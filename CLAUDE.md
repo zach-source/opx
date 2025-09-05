@@ -165,3 +165,52 @@ export OP_AUTHD_BACKEND=fake
 ```
 
 The fake backend returns predictable dummy values for any reference, enabling deterministic testing without requiring 1Password setup.
+
+## Release Workflow
+
+The project uses GoReleaser for professional release automation:
+
+### Local Development
+```bash
+# Build for current platform
+make build
+
+# Test all packages
+go test ./...
+
+# Test GoReleaser configuration
+DRY_RUN=true ./scripts/release.sh
+```
+
+### Release Process
+```bash
+# Update VERSION file
+echo "v1.0.1" > VERSION
+
+# Commit changes
+git add -A && git commit -m "feat: prepare for release"
+
+# Create release (requires GitHub CLI and GoReleaser)
+./scripts/release.sh
+```
+
+### Signing Configuration (Optional)
+
+**Apple Code Signing:**
+```bash
+export APPLE_DEVELOPER_ID='Developer ID Application: Your Name (TEAMID)'
+export MACOS_SIGN_P12='/path/to/certificate.p12'
+export MACOS_SIGN_PASSWORD='certificate-password'
+```
+
+**GPG Signing:**
+```bash
+export GPG_FINGERPRINT='your-gpg-fingerprint'
+```
+
+### Release Artifacts
+- **Cross-platform binaries**: Linux & macOS (amd64 + arm64)
+- **Separate packages**: Server and client distributed independently  
+- **Checksums**: SHA256 verification for all binaries
+- **Signatures**: GPG-signed checksums (when configured)
+- **Apple notarization**: macOS binaries signed and notarized (when configured)

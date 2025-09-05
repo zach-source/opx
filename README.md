@@ -27,7 +27,41 @@ This daemon centralizes those reads, **coalesces identical in-flight requests**,
   - `POST /v1/session/unlock` – manually unlock locked sessions
 
 ## Install
+
+### From GitHub Releases (Recommended)
+
+Download pre-built binaries for your platform:
+
 ```bash
+# Download latest release
+gh release download -R zach-source/opx
+
+# Or download specific version
+gh release download v1.0.0 -R zach-source/opx
+
+# Make binaries executable
+chmod +x op-authd-* opx-*
+
+# Rename for your platform (example for Linux x86_64)
+mv op-authd-linux-amd64 op-authd
+mv opx-linux-amd64 opx
+```
+
+### Verify Downloads
+
+```bash
+# Verify checksums (recommended)
+sha256sum -c checksums.txt
+
+# Verify GPG signature (if available)
+gpg --verify checksums.txt.sig checksums.txt
+```
+
+### From Source
+
+```bash
+git clone https://github.com/zach-source/opx.git
+cd opx
 make build
 # Binaries in ./bin: op-authd, opx
 ```
@@ -141,6 +175,22 @@ systemctl --user enable --now op-authd
     ReadRef(ctx context.Context, ref string) (string, error)
   }
   ```
+
+## Supported Platforms
+
+| Platform | Architecture | Status |
+|----------|-------------|---------|
+| Linux | x86_64 (amd64) | ✅ Supported |
+| Linux | ARM64 | ✅ Supported |  
+| macOS | Intel (amd64) | ✅ Supported |
+| macOS | Apple Silicon (arm64) | ✅ Supported |
+| Windows | x86_64 | ⏳ Planned (named pipes) |
+
+## Requirements
+
+- **1Password CLI** must be installed and authenticated
+- **Go 1.22+** (if building from source)
+- **Linux** or **macOS** operating system
 
 ## Caveats
 - Assumes the `op` CLI is installed and signed-in (for `opcli` backend).
