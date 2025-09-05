@@ -58,12 +58,19 @@ func TestStateDir(t *testing.T) {
 	// Create a temporary directory to serve as fake home
 	tempHome := t.TempDir()
 
-	// Save and restore original HOME
+	// Save and restore original HOME and clear XDG vars
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempHome)
+	t.Setenv("XDG_DATA_HOME", "")
 
-	// Test normal operation
+	// Create old directory to trigger backward compatibility
+	oldDir := filepath.Join(tempHome, ".op-authd")
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
+		t.Fatalf("Failed to create old directory: %v", err)
+	}
+
+	// Test backward compatibility operation
 	dir, err := StateDir()
 	if err != nil {
 		t.Fatalf("StateDir failed: %v", err)
@@ -125,10 +132,18 @@ func TestSocketPath(t *testing.T) {
 	// Create a temporary directory to serve as fake home
 	tempHome := t.TempDir()
 
-	// Save and restore original HOME
+	// Save and restore original HOME and clear XDG vars
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempHome)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Create old directory to trigger backward compatibility
+	oldDir := filepath.Join(tempHome, ".op-authd")
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
+		t.Fatalf("Failed to create old directory: %v", err)
+	}
 
 	sockPath, err := SocketPath()
 	if err != nil {
@@ -151,10 +166,17 @@ func TestTokenPath(t *testing.T) {
 	// Create a temporary directory to serve as fake home
 	tempHome := t.TempDir()
 
-	// Save and restore original HOME
+	// Save and restore original HOME and clear XDG vars
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tempHome)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Create old directory to trigger backward compatibility
+	oldDir := filepath.Join(tempHome, ".op-authd")
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
+		t.Fatalf("Failed to create old directory: %v", err)
+	}
 
 	tokenPath, err := TokenPath()
 	if err != nil {
@@ -410,5 +432,149 @@ func BenchmarkEnsureToken_Existing(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = EnsureToken(tokenPath)
+	}
+}
+
+func TestDataDir(t *testing.T) {
+	// Test without XDG_DATA_HOME (should use ~/.local/share/op-authd)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	dir, err := DataDir()
+	if err != nil {
+		t.Fatalf("DataDir failed: %v", err)
+	}
+
+	expectedSuffix := filepath.Join(".local", "share", "op-authd")
+	if !strings.HasSuffix(dir, expectedSuffix) {
+		t.Errorf("Expected DataDir to end with %q, got %q", expectedSuffix, dir)
+	}
+}
+
+func TestDataDirWithXDG(t *testing.T) {
+	// Test with XDG_DATA_HOME set
+	testDataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", testDataHome)
+
+	dir, err := DataDir()
+	if err != nil {
+		t.Fatalf("DataDir failed: %v", err)
+	}
+
+	expected := filepath.Join(testDataHome, "op-authd")
+	if dir != expected {
+		t.Errorf("Expected DataDir %q, got %q", expected, dir)
+	}
+}
+
+func TestConfigDir(t *testing.T) {
+	// Test without XDG_CONFIG_HOME (should use ~/.config/op-authd)
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	dir, err := ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir failed: %v", err)
+	}
+
+	expectedSuffix := filepath.Join(".config", "op-authd")
+	if !strings.HasSuffix(dir, expectedSuffix) {
+		t.Errorf("Expected ConfigDir to end with %q, got %q", expectedSuffix, dir)
+	}
+}
+
+func TestConfigDirWithXDG(t *testing.T) {
+	// Test with XDG_CONFIG_HOME set
+	testConfigHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", testConfigHome)
+
+	dir, err := ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir failed: %v", err)
+	}
+
+	expected := filepath.Join(testConfigHome, "op-authd")
+	if dir != expected {
+		t.Errorf("Expected ConfigDir %q, got %q", expected, dir)
+	}
+}
+
+func TestRuntimeDir(t *testing.T) {
+	// Test without XDG_RUNTIME_DIR (should fall back to DataDir)
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Don't create old directory, so it uses XDG paths
+	runtimeDir, err := RuntimeDir()
+	if err != nil {
+		t.Fatalf("RuntimeDir failed: %v", err)
+	}
+
+	dataDir, err := DataDir()
+	if err != nil {
+		t.Fatalf("DataDir failed: %v", err)
+	}
+
+	if runtimeDir != dataDir {
+		t.Errorf("Expected RuntimeDir to equal DataDir when XDG_RUNTIME_DIR not set, got %q vs %q", runtimeDir, dataDir)
+	}
+}
+
+func TestRuntimeDirWithXDG(t *testing.T) {
+	// Test with XDG_RUNTIME_DIR set
+	tempHome := t.TempDir()
+	testRuntimeDir := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("XDG_RUNTIME_DIR", testRuntimeDir)
+
+	// Don't create old directory, so it uses XDG paths
+	dir, err := RuntimeDir()
+	if err != nil {
+		t.Fatalf("RuntimeDir failed: %v", err)
+	}
+
+	expected := filepath.Join(testRuntimeDir, "op-authd")
+	if dir != expected {
+		t.Errorf("Expected RuntimeDir %q, got %q", expected, dir)
+	}
+}
+
+func TestStateDir_BackwardCompatibility(t *testing.T) {
+	// Test backward compatibility: when ~/.op-authd exists, it should be used
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	// Create old directory structure
+	oldDir := filepath.Join(tempHome, ".op-authd")
+	if err := os.MkdirAll(oldDir, 0o700); err != nil {
+		t.Fatalf("Failed to create old directory: %v", err)
+	}
+
+	dir, err := StateDir()
+	if err != nil {
+		t.Fatalf("StateDir failed: %v", err)
+	}
+
+	if dir != oldDir {
+		t.Errorf("Expected StateDir to use old directory %q for compatibility, got %q", oldDir, dir)
+	}
+}
+
+func TestStateDir_XDGWhenNoOldDir(t *testing.T) {
+	// Test XDG behavior when no old directory exists
+	tempHome := t.TempDir()
+	testDataHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("XDG_DATA_HOME", testDataHome)
+
+	dir, err := StateDir()
+	if err != nil {
+		t.Fatalf("StateDir failed: %v", err)
+	}
+
+	expected := filepath.Join(testDataHome, "op-authd")
+	if dir != expected {
+		t.Errorf("Expected StateDir to use XDG path %q when no old dir exists, got %q", expected, dir)
 	}
 }

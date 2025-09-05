@@ -25,7 +25,7 @@ func main() {
 	var lockOnAuthFailure bool
 
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
-	flag.StringVar(&sock, "sock", "", "unix socket path (default: ~/.op-authd/socket.sock)")
+	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
 	flag.BoolVar(&verbose, "verbose", true, "verbose logging")
 	flag.StringVar(&backendName, "backend", "opcli", "backend: opcli|fake")
 	flag.IntVar(&sessionTimeout, "session-timeout", int(session.DefaultIdleTimeout.Hours()), "session idle timeout in hours (0 to disable)")

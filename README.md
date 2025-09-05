@@ -12,8 +12,8 @@ Toolchains that shell out to `op read ...` many times end up spamming auth promp
 This daemon centralizes those reads, **coalesces identical in-flight requests**, and **short-caches** results.
 
 ## Features
-- Unix domain socket server at `~/.op-authd/socket.sock` with TLS encryption
-- Bearer token in `~/.op-authd/token` (0600) and directory perms 0700
+- Unix domain socket server with TLS encryption (XDG Base Directory compliant)
+- Bearer token with secure permissions (0600) and directory perms 0700
 - **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
 - In-memory TTL cache (default 120s) with single-flight coalescing and security clearing
 - Backends:
@@ -73,6 +73,8 @@ The client will attempt to autostart the daemon if it can't connect. You can dis
 
 ## Security Notes
 - **TLS encryption** over Unix domain socket protects all client-server communication
+- **XDG Base Directory compliant**: Respects `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_RUNTIME_DIR` 
+- **Backward compatibility**: Existing `~/.op-authd/` installations continue to work
 - The socket directory is `0700`, token is `0600`. Only your user should be able to talk to the daemon.
 - **Session idle timeout** automatically locks sessions after configurable period (default: 8 hours)
 - **Automatic cache clearing** when sessions lock for security
@@ -80,6 +82,22 @@ The client will attempt to autostart the daemon if it can't connect. You can dis
 - **Command injection protection** with comprehensive input validation
 - **Race condition protection** with atomic file operations
 - This is a prototype: **do not** expose the socket to other users or mount it across trust boundaries.
+
+## File Locations
+
+The tool follows XDG Base Directory specification with backward compatibility:
+
+### Data Files (tokens, certificates)
+- **XDG**: `$XDG_DATA_HOME/op-authd/` (fallback: `~/.local/share/op-authd/`)
+- **Legacy**: `~/.op-authd/` (used if directory already exists)
+
+### Config Files
+- **XDG**: `$XDG_CONFIG_HOME/op-authd/config.json` (fallback: `~/.config/op-authd/config.json`)  
+- **Legacy**: `~/.op-authd/config.json` (used if `~/.op-authd/` directory exists)
+
+### Runtime Files (socket)
+- **XDG**: `$XDG_RUNTIME_DIR/op-authd/socket.sock` (fallback: same as data dir)
+- **Legacy**: `~/.op-authd/socket.sock` (used if directory already exists)
 
 ## Systemd (user) example
 ```ini

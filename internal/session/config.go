@@ -59,14 +59,14 @@ func LoadConfig() (*Config, error) {
 	return config, nil
 }
 
-// loadFromFile loads configuration from ~/.op-authd/config.json
+// loadFromFile loads configuration from XDG config directory
 func (c *Config) loadFromFile() error {
-	stateDir, err := util.StateDir()
+	configDir, err := util.ConfigDir()
 	if err != nil {
 		return err
 	}
 
-	configPath := filepath.Join(stateDir, "config.json")
+	configPath := filepath.Join(configDir, "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -109,14 +109,14 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// SaveConfig saves the configuration to ~/.op-authd/config.json
+// SaveConfig saves the configuration to XDG config directory
 func (c *Config) SaveConfig() error {
-	stateDir, err := util.StateDir()
+	configDir, err := util.ConfigDir()
 	if err != nil {
 		return err
 	}
 
-	configPath := filepath.Join(stateDir, "config.json")
+	configPath := filepath.Join(configDir, "config.json")
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

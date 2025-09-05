@@ -125,8 +125,9 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 ## Security Considerations
 
 - **TLS Encryption**: All communication over Unix socket is TLS-encrypted with self-signed certificates
-- **Socket Security**: Socket path `~/.op-authd/socket.sock` with 0700 directory permissions
-- **Authentication**: Token stored in `~/.op-authd/token` with 0600 permissions  
+- **XDG Compliance**: Follows XDG Base Directory specification for config/data separation
+- **Socket Security**: Socket path with 0700 directory permissions (XDG runtime dir or legacy ~/.op-authd/)
+- **Authentication**: Token stored with 0600 permissions (XDG data dir or legacy ~/.op-authd/)  
 - **Session Management**: Configurable idle timeout (default: 8 hours) with automatic locking
 - **Cache Security**: Automatic cache clearing when sessions lock
 - **Input Validation**: Command injection protection and reference format validation

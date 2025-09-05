@@ -17,8 +17,18 @@ func HomeDir() string {
 	return h
 }
 
-func StateDir() (string, error) {
-	dir := filepath.Join(HomeDir(), ".op-authd")
+// DataDir returns the XDG-compliant data directory for op-authd
+func DataDir() (string, error) {
+	var dir string
+
+	// Check XDG_DATA_HOME first
+	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
+		dir = filepath.Join(xdgDataHome, "op-authd")
+	} else {
+		// Fallback to ~/.local/share/op-authd
+		dir = filepath.Join(HomeDir(), ".local", "share", "op-authd")
+	}
+
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", dir, err)
 	}
@@ -26,6 +36,74 @@ func StateDir() (string, error) {
 		return "", err
 	}
 	return dir, nil
+}
+
+// ConfigDir returns the XDG-compliant config directory for op-authd
+func ConfigDir() (string, error) {
+	var dir string
+
+	// Check XDG_CONFIG_HOME first
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		dir = filepath.Join(xdgConfigHome, "op-authd")
+	} else {
+		// Fallback to ~/.config/op-authd
+		dir = filepath.Join(HomeDir(), ".config", "op-authd")
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// RuntimeDir returns the XDG-compliant runtime directory for op-authd
+func RuntimeDir() (string, error) {
+	// For backward compatibility, check if old ~/.op-authd directory exists
+	oldDir := filepath.Join(HomeDir(), ".op-authd")
+	if _, err := os.Stat(oldDir); err == nil {
+		// Old directory exists, use it for runtime files too
+		if err := os.Chmod(oldDir, 0o700); err != nil {
+			return "", err
+		}
+		return oldDir, nil
+	}
+
+	var dir string
+
+	// Check XDG_RUNTIME_DIR first
+	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
+		dir = filepath.Join(xdgRuntimeDir, "op-authd")
+	} else {
+		// Fallback to data directory for runtime files
+		return DataDir()
+	}
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// StateDir maintains backward compatibility (now an alias for DataDir)
+func StateDir() (string, error) {
+	// For backward compatibility, check if old ~/.op-authd directory exists
+	oldDir := filepath.Join(HomeDir(), ".op-authd")
+	if _, err := os.Stat(oldDir); err == nil {
+		// Old directory exists, continue using it for backward compatibility
+		if err := os.Chmod(oldDir, 0o700); err != nil {
+			return "", err
+		}
+		return oldDir, nil
+	}
+
+	// No old directory, use XDG-compliant path
+	return DataDir()
 }
 
 func SocketPath() (string, error) {
