@@ -358,3 +358,62 @@ func TestCache_OverwriteExistingKey(t *testing.T) {
 		t.Errorf("Expected size=1 after overwrite, got size=%d", size)
 	}
 }
+
+func TestCache_Clear(t *testing.T) {
+	cache := New(5 * time.Minute)
+
+	// Add several keys
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set("key3", "value3")
+
+	// Verify they exist
+	size, _, _, _ := cache.Stats()
+	if size != 3 {
+		t.Errorf("Expected cache size 3, got %d", size)
+	}
+
+	// Clear the cache
+	removed := cache.Clear()
+	if removed != 3 {
+		t.Errorf("Expected 3 items removed, got %d", removed)
+	}
+
+	// Verify cache is empty
+	size, _, _, _ = cache.Stats()
+	if size != 0 {
+		t.Errorf("Expected cache size 0 after clear, got %d", size)
+	}
+
+	// Verify keys don't exist
+	_, found, _, _ := cache.Get("key1")
+	if found {
+		t.Error("Expected key1 to not exist after clear")
+	}
+
+	_, found, _, _ = cache.Get("key2")
+	if found {
+		t.Error("Expected key2 to not exist after clear")
+	}
+
+	_, found, _, _ = cache.Get("key3")
+	if found {
+		t.Error("Expected key3 to not exist after clear")
+	}
+}
+
+func TestCache_ClearEmptyCache(t *testing.T) {
+	cache := New(5 * time.Minute)
+
+	// Clear empty cache
+	removed := cache.Clear()
+	if removed != 0 {
+		t.Errorf("Expected 0 items removed from empty cache, got %d", removed)
+	}
+
+	// Verify still empty
+	size, _, _, _ := cache.Stats()
+	if size != 0 {
+		t.Errorf("Expected cache size 0, got %d", size)
+	}
+}

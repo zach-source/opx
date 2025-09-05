@@ -47,10 +47,11 @@ The project follows a clean layered architecture with clear separation of concer
 ### Core Components
 
 **Server Layer (`internal/server/`)**
-- HTTP server over Unix domain socket 
+- HTTP server over Unix domain socket with TLS encryption
 - JWT-like token authentication via `X-OpAuthd-Token` header
 - Request routing and middleware (auth, JSON handling)
-- Integrates cache and backend layers via dependency injection
+- Session management integration with lifecycle management
+- Integrates cache, backend, and session layers via dependency injection
 
 **Client Layer (`internal/client/`)**
 - HTTP client with Unix socket transport
@@ -61,6 +62,7 @@ The project follows a clean layered architecture with clear separation of concer
 - Interface: `Backend` with `ReadRef(ctx, ref) (string, error)` and `Name() string`
 - `OpCLI`: Production backend that shells out to `op read` command
 - `Fake`: Test/dev backend that returns deterministic dummy values
+- `SessionAwareBackend`: Wrapper that adds session validation to any backend
 - Switch backends via `OP_AUTHD_BACKEND` or `--backend` flag
 
 **Caching Layer (`internal/cache/`)**
@@ -68,10 +70,19 @@ The project follows a clean layered architecture with clear separation of concer
 - Thread-safe with RWMutex
 - Hit/miss/inflight statistics tracking
 - Best-effort string zeroization for security
+- Automatic cache clearing on session lock
+
+**Session Management (`internal/session/`)**
+- Thread-safe session state management (Unknown, Authenticated, Locked, Expired)
+- Configurable idle timeout with background monitoring (default: 8 hours)
+- Callback architecture for lock/unlock mechanisms
+- Environment variable and config file support
+- Zero external dependencies (pure Go standard library)
 
 **Protocol Layer (`internal/protocol/`)**
 - JSON request/response structs for all API endpoints
 - Clean separation between wire format and internal logic
+- Session status and unlock request/response structs
 
 ### Key Architectural Patterns
 
@@ -85,24 +96,43 @@ The project follows a clean layered architecture with clear separation of concer
 
 ## API Endpoints
 
-The daemon exposes these HTTP endpoints over Unix socket:
+The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 
-- `GET /v1/status` - Health check and statistics
+- `GET /v1/status` - Health check, statistics, and session information
 - `POST /v1/read` - Read single secret reference  
 - `POST /v1/reads` - Batch read multiple secret references
 - `POST /v1/resolve` - Resolve environment variable mappings from refs to values
+- `POST /v1/session/unlock` - Manually unlock locked sessions
 
-## Environment Variables
+## Configuration
+
+### Command-Line Flags
+
+- `--ttl=120` - Cache TTL in seconds
+- `--backend=opcli` - Backend type (`opcli` or `fake`)
+- `--verbose` - Enable verbose logging
+- `--session-timeout=8` - Session idle timeout in hours (0 to disable)
+- `--enable-session-lock=true` - Enable session management
+- `--lock-on-auth-failure=true` - Lock session on authentication failures
+
+### Environment Variables
 
 - `OP_AUTHD_BACKEND`: Set to `fake` for testing (default: `opcli`)
 - `OPX_AUTOSTART`: Set to `0` to disable client auto-starting daemon
+- `OP_AUTHD_SESSION_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
+- `OP_AUTHD_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
 
 ## Security Considerations
 
-- Socket path: `~/.op-authd/socket.sock` with 0700 directory permissions
-- Authentication token stored in `~/.op-authd/token` with 0600 permissions  
-- Values kept in-memory only with best-effort zeroization on eviction
-- 20-second timeout on backend calls to prevent hanging
+- **TLS Encryption**: All communication over Unix socket is TLS-encrypted with self-signed certificates
+- **Socket Security**: Socket path `~/.op-authd/socket.sock` with 0700 directory permissions
+- **Authentication**: Token stored in `~/.op-authd/token` with 0600 permissions  
+- **Session Management**: Configurable idle timeout (default: 8 hours) with automatic locking
+- **Cache Security**: Automatic cache clearing when sessions lock
+- **Input Validation**: Command injection protection and reference format validation
+- **Memory Security**: Values kept in-memory only with best-effort zeroization on eviction
+- **Timeout Protection**: 20-second timeout on backend calls to prevent hanging
+- **Race Condition Protection**: Atomic file operations for token management
 
 ## Testing Strategy
 

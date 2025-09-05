@@ -12,9 +12,10 @@ Toolchains that shell out to `op read ...` many times end up spamming auth promp
 This daemon centralizes those reads, **coalesces identical in-flight requests**, and **short-caches** results.
 
 ## Features
-- Unix domain socket server at `~/.op-authd/socket.sock`
+- Unix domain socket server at `~/.op-authd/socket.sock` with TLS encryption
 - Bearer token in `~/.op-authd/token` (0600) and directory perms 0700
-- In-memory TTL cache (default 120s) with single-flight coalescing
+- **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
+- In-memory TTL cache (default 120s) with single-flight coalescing and security clearing
 - Backends:
   - `opcli` (default): shells out to `op read <ref>` and relies on 1Password's built-in auth/daemon
   - `fake`: returns deterministic dummy values for testing (`export OP_AUTHD_BACKEND=fake`)
@@ -22,7 +23,8 @@ This daemon centralizes those reads, **coalesces identical in-flight requests**,
   - `POST /v1/read` – read a single ref
   - `POST /v1/reads` – batch read multiple refs
   - `POST /v1/resolve` – resolve env var mapping `{ENV: ref}`
-  - `GET  /v1/status` – health/counters
+  - `GET  /v1/status` – health/counters and session information
+  - `POST /v1/session/unlock` – manually unlock locked sessions
 
 ## Install
 ```bash
@@ -32,8 +34,28 @@ make build
 
 ## Run Daemon
 ```bash
+# Default configuration (8-hour session timeout)
 ./bin/op-authd --ttl 120 --verbose
+
+# Custom session timeout (4 hours)
+./bin/op-authd --ttl 120 --session-timeout 4 --verbose
+
+# Disable session management 
+./bin/op-authd --ttl 120 --enable-session-lock=false --verbose
+
+# All session options
+./bin/op-authd \
+  --ttl 120 \
+  --session-timeout 8 \
+  --enable-session-lock=true \
+  --lock-on-auth-failure=true \
+  --verbose
 ```
+
+### Session Management Options
+- `--session-timeout=8` - Idle timeout in hours (0 to disable, default: 8)
+- `--enable-session-lock=true` - Enable session idle timeout and locking 
+- `--lock-on-auth-failure=true` - Lock session on authentication failures
 
 ## Client Usage
 ```bash
@@ -50,8 +72,13 @@ make build
 The client will attempt to autostart the daemon if it can't connect. You can disable this via `OPX_AUTOSTART=0`.
 
 ## Security Notes
+- **TLS encryption** over Unix domain socket protects all client-server communication
 - The socket directory is `0700`, token is `0600`. Only your user should be able to talk to the daemon.
-- Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows.
+- **Session idle timeout** automatically locks sessions after configurable period (default: 8 hours)
+- **Automatic cache clearing** when sessions lock for security
+- Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows
+- **Command injection protection** with comprehensive input validation
+- **Race condition protection** with atomic file operations
 - This is a prototype: **do not** expose the socket to other users or mount it across trust boundaries.
 
 ## Systemd (user) example

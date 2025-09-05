@@ -21,6 +21,7 @@ import (
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
 	"github.com/zach-source/opx/internal/protocol"
+	"github.com/zach-source/opx/internal/session"
 	"github.com/zach-source/opx/internal/util"
 )
 
@@ -29,6 +30,7 @@ type Server struct {
 	Token    string
 	Cache    *cache.Cache
 	Backend  backend.Backend
+	Session  *session.Manager
 	Verbose  bool
 
 	sf singleflight.Group
@@ -79,11 +81,20 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("/v1/read", s.auth(s.handleRead))
 	mux.HandleFunc("/v1/reads", s.auth(s.handleReads))
 	mux.HandleFunc("/v1/resolve", s.auth(s.handleResolve))
+	mux.HandleFunc("/v1/session/unlock", s.auth(s.handleSessionUnlock))
 
 	srv := &http.Server{Handler: mux}
 
 	// Start periodic cache cleanup
 	go s.startCacheCleanup(ctx)
+
+	// Session management
+	if s.Session != nil {
+		// Set up cache clearing callback for security
+		s.setupSessionLockCallback()
+		s.Session.Start(ctx)
+		defer s.Session.Stop()
+	}
 
 	go func() {
 		<-ctx.Done()
@@ -98,6 +109,27 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	return srv.Serve(tlsListener)
+}
+
+// setupSessionLockCallback configures the session manager to clear cache on lock
+func (s *Server) setupSessionLockCallback() {
+	// Create lock callback that clears cache for security
+	lockCallback := func() error {
+		if s.Verbose {
+			log.Printf("[session] clearing cache on session lock for security")
+		}
+		// Clear the cache for security when session locks
+		s.Cache.Clear()
+		return nil
+	}
+
+	// Set up session validation callback
+	unlockCallback := func(ctx context.Context) error {
+		// Validate session using CLI directly
+		return backend.ValidateCurrentSession(ctx)
+	}
+
+	s.Session.SetCallbacks(lockCallback, unlockCallback)
 }
 
 func (s *Server) CacheTTL() time.Duration {
@@ -150,6 +182,54 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		TTLSeconds: int(s.CacheTTL().Seconds()),
 		SocketPath: s.SockPath,
 	}
+
+	// Add session information if session manager is available
+	if s.Session != nil {
+		sessionInfo := s.Session.GetInfo()
+		resp.Session = &protocol.SessionStatus{
+			State:         sessionInfo.State.String(),
+			IdleTimeout:   int(sessionInfo.IdleTimeout.Seconds()),
+			TimeUntilLock: int(sessionInfo.TimeUntilLock().Seconds()),
+			Enabled:       sessionInfo.IdleTimeout > 0,
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleSessionUnlock(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if s.Session == nil {
+		resp := protocol.SessionUnlockResponse{
+			Success: false,
+			State:   "disabled",
+			Message: "Session management is disabled",
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Attempt to validate/unlock the session
+	err := s.Session.ValidateSession(r.Context())
+	sessionInfo := s.Session.GetInfo()
+
+	resp := protocol.SessionUnlockResponse{
+		Success: err == nil,
+		State:   sessionInfo.State.String(),
+	}
+
+	if err != nil {
+		resp.Message = fmt.Sprintf("Session unlock failed: %v", err)
+		w.WriteHeader(http.StatusUnauthorized)
+	} else {
+		resp.Message = "Session unlocked successfully"
+	}
+
 	_ = json.NewEncoder(w).Encode(resp)
 }
 

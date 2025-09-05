@@ -32,11 +32,29 @@ type ResolveResponse struct {
 }
 
 type Status struct {
-	Backend    string `json:"backend"`
-	CacheSize  int    `json:"cache_size"`
-	Hits       int64  `json:"hits"`
-	Misses     int64  `json:"misses"`
-	InFlight   int    `json:"in_flight"`
-	TTLSeconds int    `json:"ttl_seconds"`
-	SocketPath string `json:"socket_path"`
+	Backend    string         `json:"backend"`
+	CacheSize  int            `json:"cache_size"`
+	Hits       int64          `json:"hits"`
+	Misses     int64          `json:"misses"`
+	InFlight   int            `json:"in_flight"`
+	TTLSeconds int            `json:"ttl_seconds"`
+	SocketPath string         `json:"socket_path"`
+	Session    *SessionStatus `json:"session,omitempty"`
+}
+
+type SessionStatus struct {
+	State         string `json:"state"`
+	IdleTimeout   int    `json:"idle_timeout_seconds"`
+	TimeUntilLock int    `json:"time_until_lock_seconds"`
+	Enabled       bool   `json:"enabled"`
+}
+
+type SessionUnlockRequest struct {
+	// No fields needed - unlock is based on validating current CLI session
+}
+
+type SessionUnlockResponse struct {
+	Success bool   `json:"success"`
+	State   string `json:"state"`
+	Message string `json:"message,omitempty"`
 }
