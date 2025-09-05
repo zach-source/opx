@@ -1,0 +1,11 @@
+
+/bin/
+/dist/
+/build/
+/coverage/
+/tmp/
+*.log
+*.swp
+*.swo
+.DS_Store
+go.sum
