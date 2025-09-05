@@ -1,0 +1,190 @@
+project_name: opx
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: op-authd
+    main: ./cmd/op-authd
+    binary: op-authd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+
+  - id: opx
+    main: ./cmd/opx
+    binary: opx
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+
+archives:
+  - id: server
+    builds:
+      - op-authd
+    name_template: "{{ .ProjectName }}-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - CURRENT_STATUS.md
+
+  - id: client
+    builds:
+      - opx
+    name_template: "{{ .ProjectName }}-client_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+# macOS code signing and notarization
+notarize:
+  macos:
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+      ids:
+        - op-authd
+        - opx
+      sign:
+        certificate: "{{.Env.MACOS_SIGN_P12}}"
+        password: "{{.Env.MACOS_SIGN_PASSWORD}}"
+      notarize:
+        issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
+        key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
+        key: "{{.Env.MACOS_NOTARY_KEY}}"
+        wait: true
+        timeout: 20m
+
+# Sign checksums
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^style:'
+      - '^refactor:'
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: 'Bug fixes'
+      regexp: '^.*?bug(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Security
+      regexp: '^.*?sec(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: zach-source
+    name: opx
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## 🎉 opx {{ .Tag }} - 1Password CLI Batching Daemon
+
+    ### 🔒 Security Features
+    - **Session Idle Timeout**: Configurable automatic locking (default: 8 hours)
+    - **TLS Encryption**: All client-server communication encrypted
+    - **Input Validation**: Command injection and race condition protection
+    - **Cache Security**: Automatic clearing when sessions lock
+
+    ### 🌐 Modern Unix Integration  
+    - **XDG Base Directory**: Full compliance with proper config/data separation
+    - **Backward Compatibility**: Existing `~/.op-authd/` installations preserved
+
+    ### ⚡ Performance & Reliability
+    - **Request Coalescing**: Eliminates duplicate concurrent secret reads
+    - **Thread-Safe**: Robust concurrent access throughout  
+    - **Memory Management**: Automated cleanup with configurable intervals
+
+  footer: |
+    ### 📦 Installation
+
+    **Download binaries for your platform from the assets below.**
+
+    Make binaries executable:
+    ```bash
+    chmod +x op-authd opx
+    ```
+
+    **Quick Start:**
+    ```bash
+    # Start daemon (8-hour session timeout)
+    ./op-authd --verbose
+
+    # Use client to read secrets
+    ./opx read "op://Engineering/DB/password"
+    ```
+
+    ### 🔍 Security Verification
+    ```bash
+    # Verify checksums
+    sha256sum -c checksums.txt
+    
+    # Verify GPG signature (if available)
+    gpg --verify checksums.txt.sig checksums.txt
+    ```
+
+    ### 📋 Requirements
+    - **1Password CLI** must be installed and authenticated
+    - **Linux** or **macOS** (Windows support planned)
+
+gomod:
+  proxy: true
