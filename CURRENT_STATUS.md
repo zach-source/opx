@@ -160,15 +160,23 @@ The opx project has undergone comprehensive security review and remediation. All
 
 ## 🎯 Next Development Priorities
 
-1. **Test Completion** - Add server and client package tests ✅ **TOP PRIORITY**
-2. **Production Readiness** - Implement monitoring and observability
-3. **Performance Optimization** - Add metrics and profiling support
-4. **Security Hardening** - Implement remaining medium/low priority security enhancements
+1. **Session Idle Timeout** - Implement configurable session locking after idle periods ⭐ **NEW PRIORITY**
+2. **Test Completion** - Add server and client package tests ✅ **TOP PRIORITY**
+3. **Production Readiness** - Implement monitoring and observability
+4. **Performance Optimization** - Add metrics and profiling support
+5. **Security Hardening** - Implement remaining medium/low priority security enhancements
 
 ## 📋 Definition of Done for Next Phase
 
 - [x] All HIGH priority security items resolved ✅ **COMPLETED 2025-09-05**
 - [x] IPC encryption implementation ✅ **COMPLETED 2025-09-05**
+- [ ] **Session idle timeout implementation** ⭐ **NEW REQUIREMENT**
+  - [ ] Configurable idle timeout (default: 8 hours)
+  - [ ] Session state tracking and management
+  - [ ] Automatic session locking on idle timeout
+  - [ ] Manual session unlock mechanism
+  - [ ] Cache clearing on session lock for security
+  - [ ] Configuration via CLI flags and config file
 - [ ] Server and client test coverage >80%
 - [ ] Integration test suite for full workflows
 - [ ] Production deployment documentation
@@ -188,6 +196,13 @@ The opx project has undergone comprehensive security review and remediation. All
 - 🛡️ **Defense in depth implemented**: TLS encryption now protects crown jewel credentials ✅ **IMPLEMENTED**
 - 📊 **Attack vectors mitigated**: strace, ptrace, process debugging, malware now see encrypted traffic ✅ **SECURED**
 - 🔐 **End-to-end encryption**: Client ↔ Server communication fully protected with TLS ✅ **COMPLETED**
+
+### New Security Enhancement Identified (2025-09-05):
+- 🔒 **Session Idle Timeout Requirement**: Currently no automatic session locking mechanism
+  - **Risk**: Secrets remain accessible indefinitely if user leaves workstation
+  - **Solution**: Implement configurable idle timeout (default: 8 hours) with automatic session locking
+  - **Status**: Planning complete - ready for implementation ([See detailed plan](./SESSION_LOCK_IMPLEMENTATION_PLAN.md))
+  - **Priority**: HIGH - Complements existing security posture with idle workstation protection
 
 ---
 
