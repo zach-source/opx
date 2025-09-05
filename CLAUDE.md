@@ -117,10 +117,16 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 
 ### Environment Variables
 
+#### Application Configuration
 - `OP_AUTHD_BACKEND`: Set to `fake` for testing (default: `opcli`)
 - `OPX_AUTOSTART`: Set to `0` to disable client auto-starting daemon
 - `OP_AUTHD_SESSION_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
 - `OP_AUTHD_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
+
+#### XDG Base Directory Specification
+- `XDG_CONFIG_HOME`: Config directory base (default: `~/.config`)
+- `XDG_DATA_HOME`: Data directory base (default: `~/.local/share`)
+- `XDG_RUNTIME_DIR`: Runtime directory base (varies by system)
 
 ## Security Considerations
 
@@ -134,6 +140,21 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - **Memory Security**: Values kept in-memory only with best-effort zeroization on eviction
 - **Timeout Protection**: 20-second timeout on backend calls to prevent hanging
 - **Race Condition Protection**: Atomic file operations for token management
+
+## File System Layout
+
+The application follows XDG Base Directory specification with backward compatibility:
+
+### XDG-Compliant Paths (New Installations)
+- **Config**: `$XDG_CONFIG_HOME/op-authd/config.json` (fallback: `~/.config/op-authd/config.json`)
+- **Data**: `$XDG_DATA_HOME/op-authd/` (fallback: `~/.local/share/op-authd/`)
+  - `token` - Authentication token
+  - `cert.pem`, `key.pem` - TLS certificates
+- **Runtime**: `$XDG_RUNTIME_DIR/op-authd/socket.sock` (fallback: same as data directory)
+
+### Legacy Paths (Existing Installations)
+- **All files**: `~/.op-authd/` (used when directory already exists)
+  - `config.json`, `token`, `cert.pem`, `key.pem`, `socket.sock`
 
 ## Testing Strategy
 

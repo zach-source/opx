@@ -57,6 +57,19 @@ make build
 - `--enable-session-lock=true` - Enable session idle timeout and locking 
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
 
+## Environment Variables
+
+### Application Configuration
+- `OP_AUTHD_BACKEND=fake` - Set backend for testing (default: `opcli`)
+- `OPX_AUTOSTART=0` - Disable client auto-starting daemon
+- `OP_AUTHD_SESSION_TIMEOUT=8h` - Session timeout (duration format)
+- `OP_AUTHD_ENABLE_SESSION_LOCK=true` - Enable session management
+
+### XDG Base Directory Specification  
+- `XDG_CONFIG_HOME` - Config directory base (default: `~/.config`)
+- `XDG_DATA_HOME` - Data directory base (default: `~/.local/share`) 
+- `XDG_RUNTIME_DIR` - Runtime directory base (system-specific)
+
 ## Client Usage
 ```bash
 # Single read
