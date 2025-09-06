@@ -1,5 +1,5 @@
 
-# opx - 1Password CLI Batching Daemon
+# opx - Multi-Backend Secret Batching Daemon
 
 A **multi-backend secret batching daemon** (`opx-authd`) with a companion client (`opx`).
 It coalesces concurrent secret reads across processes from multiple sources (1Password, HashiCorp Vault, OpenBao), 
@@ -94,11 +94,12 @@ make build
   --verbose
 ```
 
-### Security Options
+### Security and Audit Options
 - `--session-timeout=8` - Idle timeout in hours (0 to disable, default: 8)
 - `--enable-session-lock=true` - Enable session idle timeout and locking 
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
 - `--enable-audit-log` - Enable structured audit logging to file
+- `--audit-log-retention-days=30` - Number of days to keep audit logs (0 = keep all)
 
 ## Environment Variables
 
@@ -255,10 +256,17 @@ Enable comprehensive security audit logging with `--enable-audit-log`:
 - **Session events**: Session lock/unlock operations
 - **Process tracking**: Complete process information (PID, path, UID/GID where available)
 
-### Audit Log Location
+### Audit Log Location and Rotation
 
-- **XDG**: `$XDG_DATA_HOME/op-authd/audit.log` (fallback: `~/.local/share/op-authd/audit.log`)
-- **Legacy**: `~/.op-authd/audit.log` (if legacy directory exists)
+**Daily Log Files:**
+- **XDG**: `$XDG_DATA_HOME/op-authd/audit-YYYY-MM-DD.log` (fallback: `~/.local/share/op-authd/audit-YYYY-MM-DD.log`)
+- **Legacy**: `~/.op-authd/audit-YYYY-MM-DD.log` (if legacy directory exists)
+
+**Rotation Features:**
+- **Daily rotation**: New log file created each day at midnight
+- **Configurable retention**: Default 30 days, configurable via `--audit-log-retention-days`
+- **Automatic cleanup**: Old logs automatically removed based on retention policy
+- **Historical analysis**: `opx audit` scans across all available daily log files
 
 ### Example Audit Events
 

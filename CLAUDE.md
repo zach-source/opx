@@ -13,13 +13,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Summary
 
-The opx project is a **complete implementation** of a 1Password CLI batching daemon with:
+The opx project is a **complete multi-backend secret management solution** with:
+- **Multi-backend support** (1Password + HashiCorp Vault + OpenBao)
 - **6-layer security architecture** (TLS, tokens, peer validation, policies, sessions, audit)
-- **Modern Go 1.24** with generics and latest language features
+- **Modern Go 1.24** with generics, SafeString, and latest language features
 - **XDG Base Directory compliance** with backward compatibility
-- **Interactive audit management** for policy creation and security analysis
-- **Professional release automation** with cross-platform builds and code signing
-- **Comprehensive test coverage** (35+ test cases across all components)
+- **Interactive audit management** with daily log rotation and retention
+- **Professional release automation** with conventional commits and svu versioning
+- **Comprehensive test coverage** (40+ test cases across all components)
 
 ## Build and Development Commands
 
@@ -70,10 +71,13 @@ The project follows a clean layered architecture with clear separation of concer
 
 **Backend Abstraction (`internal/backend/`)**
 - Interface: `Backend` with `ReadRef(ctx, ref) (string, error)` and `Name() string`
-- `OpCLI`: Production backend that shells out to `op read` command
-- `Fake`: Test/dev backend that returns deterministic dummy values
+- `OpCLI`: 1Password backend that shells out to `op read` command
+- `Vault`: HashiCorp Vault backend with `vault://` URI support
+- `Bao`: OpenBao backend with `bao://` URI support (Vault-compatible)
+- `MultiBackend`: Routes requests to appropriate backend based on URI scheme
 - `SessionAwareBackend`: Wrapper that adds session validation to any backend
-- Switch backends via `OP_AUTHD_BACKEND` or `--backend` flag
+- `Fake`: Test/dev backend that returns deterministic dummy values
+- Switch backends via `--backend` flag: opcli|fake|vault|bao|multi
 
 **Caching Layer (`internal/cache/`)**
 - In-memory TTL cache with configurable expiration
@@ -101,11 +105,12 @@ The project follows a clean layered architecture with clear separation of concer
 - Default allow/deny behavior configuration
 
 **Audit Layer (`internal/audit/`)**
-- Structured JSON audit logging to file
+- Structured JSON audit logging with daily rotation (audit-YYYY-MM-DD.log)
+- Configurable retention policy with automatic old log cleanup
 - Access decision tracking with complete process information
-- Authentication and session event logging
-- Configurable audit trail for compliance and security monitoring
+- Authentication and session event logging across all backends
 - Interactive audit log analysis and policy management tools
+- Multi-file scanning for historical audit analysis
 
 **Protocol Layer (`internal/protocol/`)**
 - JSON request/response structs for all API endpoints
@@ -145,6 +150,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `--enable-session-lock=true` - Enable session management
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
 - `--enable-audit-log` - Enable structured audit logging to file
+- `--audit-log-retention-days=30` - Number of days to keep audit logs
 
 ### Environment Variables
 
