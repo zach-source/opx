@@ -6,9 +6,9 @@ before:
     - go test ./...
 
 builds:
-  - id: op-authd
-    main: ./cmd/op-authd
-    binary: op-authd
+  - id: opx-authd
+    main: ./cmd/opx-authd
+    binary: opx-authd
     env:
       - CGO_ENABLED=0
     goos:
@@ -49,7 +49,7 @@ builds:
 archives:
   - id: server
     builds:
-      - op-authd
+      - opx-authd
     name_template: "{{ .ProjectName }}-server_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
@@ -75,7 +75,7 @@ notarize:
   macos:
     - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
       ids:
-        - op-authd
+        - opx-authd
         - opx
       sign:
         certificate: "{{.Env.MACOS_SIGN_P12}}"

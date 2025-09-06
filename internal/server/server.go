@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
 	"github.com/zach-source/opx/internal/policy"
@@ -33,13 +34,15 @@ type contextKey string
 const peerInfoKey = contextKey("peerInfo")
 
 type Server struct {
-	SockPath string
-	Token    string
-	Cache    *cache.Cache
-	Backend  backend.Backend
-	Session  *session.Manager
-	Policy   policy.Policy
-	Verbose  bool
+	SockPath    string
+	Token       string
+	Cache       *cache.Cache
+	Backend     backend.Backend
+	Session     *session.Manager
+	Policy      policy.Policy
+	PolicyPath  string
+	AuditLogger *audit.Logger
+	Verbose     bool
 
 	sf singleflight.Group
 	mu sync.Mutex
@@ -226,6 +229,15 @@ func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
 	}
 
 	allowed := policy.Allowed(s.Policy, subject, ref)
+
+	// Audit log the access decision
+	if s.AuditLogger != nil {
+		details := map[string]string{
+			"subject_pid":  fmt.Sprintf("%d", subject.PID),
+			"subject_path": subject.Path,
+		}
+		s.AuditLogger.LogAccessDecision(peerInfo, ref, allowed, s.PolicyPath, details)
+	}
 
 	if s.Verbose {
 		if allowed {

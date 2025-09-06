@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
 	"github.com/zach-source/opx/internal/policy"
@@ -24,6 +25,7 @@ func main() {
 	var sessionTimeout int
 	var enableSessionLock bool
 	var lockOnAuthFailure bool
+	var enableAuditLog bool
 
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
@@ -32,6 +34,7 @@ func main() {
 	flag.IntVar(&sessionTimeout, "session-timeout", int(session.DefaultIdleTimeout.Hours()), "session idle timeout in hours (0 to disable)")
 	flag.BoolVar(&enableSessionLock, "enable-session-lock", true, "enable session idle timeout and locking")
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
+	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.Parse()
 
 	// Load session configuration from environment/file, then override with flags
@@ -83,13 +86,26 @@ func main() {
 		log.Printf("Loaded access policy from %s", policyPath)
 	}
 
+	// Create audit logger
+	auditLogger, err := audit.NewLogger(enableAuditLog)
+	if err != nil {
+		log.Fatalf("Failed to create audit logger: %v", err)
+	}
+	defer auditLogger.Close()
+
+	if enableAuditLog && verbose {
+		log.Printf("Audit logging enabled")
+	}
+
 	srv := &server.Server{
-		SockPath: sock,
-		Backend:  be,
-		Cache:    cache.New(time.Duration(ttlSec) * time.Second),
-		Session:  sessionManager,
-		Policy:   accessPolicy,
-		Verbose:  verbose,
+		SockPath:    sock,
+		Backend:     be,
+		Cache:       cache.New(time.Duration(ttlSec) * time.Second),
+		Session:     sessionManager,
+		Policy:      accessPolicy,
+		PolicyPath:  policyPath,
+		AuditLogger: auditLogger,
+		Verbose:     verbose,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

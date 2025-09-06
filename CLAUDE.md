@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`opx` is a 1Password CLI batching daemon that coalesces concurrent secret reads across processes, caches results briefly, and provides a local API over Unix domain socket. It consists of:
+`opx` is a production-ready 1Password CLI batching daemon that coalesces concurrent secret reads across processes, caches results briefly, and provides a secure local API over TLS-encrypted Unix domain socket with comprehensive access controls. It consists of:
 
-- `op-authd`: The daemon server that handles secret fetching and caching
+- `opx-authd`: The daemon server that handles secret fetching, caching, and access control
 - `opx`: The client CLI that communicates with the daemon
 
 **📋 Current Status**: See [CURRENT_STATUS.md](./CURRENT_STATUS.md) for recent security review results, action items, and development priorities.
@@ -30,7 +30,7 @@ go test ./...
 go test ./internal/cache
 
 # Build individual binaries manually
-go build -o bin/op-authd ./cmd/op-authd
+go build -o bin/opx-authd ./cmd/opx-authd
 go build -o bin/opx ./cmd/opx
 
 # Format code
@@ -90,6 +90,12 @@ The project follows a clean layered architecture with clear separation of concer
 - Reference pattern matching (wildcards supported)
 - Default allow/deny behavior configuration
 
+**Audit Layer (`internal/audit/`)**
+- Structured JSON audit logging to file
+- Access decision tracking with complete process information
+- Authentication and session event logging
+- Configurable audit trail for compliance and security monitoring
+
 **Protocol Layer (`internal/protocol/`)**
 - JSON request/response structs for all API endpoints
 - Clean separation between wire format and internal logic
@@ -127,6 +133,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `--session-timeout=8` - Session idle timeout in hours (0 to disable)
 - `--enable-session-lock=true` - Enable session management
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
+- `--enable-audit-log` - Enable structured audit logging to file
 
 ### Environment Variables
 

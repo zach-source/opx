@@ -46,15 +46,16 @@ info "Preparing release ${VERSION}..."
 info "Creating git tag ${VERSION}..."
 git tag -a "${VERSION}" -m "Release ${VERSION}
 
-🎉 opx ${VERSION} - Production Release
+🎉 opx ${VERSION} - Enterprise Production Release
 
 Features:
 - Session idle timeout with 8-hour default and full configurability  
 - XDG Base Directory specification compliance with backward compatibility
 - TLS encryption over Unix domain sockets with self-signed certificates
-- Comprehensive security protections (input validation, race conditions)
+- Peer credential validation and policy-based access control
+- Comprehensive audit logging for security compliance
 - Full API with status and session unlock endpoints
-- CLI integration with session management flags
+- CLI integration with security and session management flags
 
 Security:
 - All HIGH priority security items resolved
@@ -110,7 +111,7 @@ echo
 echo "📋 Release Summary:"
 echo "  • Version: ${VERSION}"
 echo "  • Platforms: Linux & macOS (amd64 & arm64)"  
-echo "  • Binaries: op-authd (server) + opx (client)"
+echo "  • Binaries: opx-authd (server) + opx (client)"
 if [[ -n "${APPLE_DEVELOPER_ID:-}" ]]; then
     echo "  • Apple Signed: ✅ Yes"
 else

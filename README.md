@@ -1,11 +1,11 @@
 
-# op-authd-proto
+# opx - 1Password CLI Batching Daemon
 
-A prototype **1Password op CLI batching daemon** (`op-authd`) with a companion client (`opx`).
-It coalesces concurrent secret reads across processes, caches results briefly, and provides a simple
-local API over a Unix domain socket.
+A **1Password CLI batching daemon** (`opx-authd`) with a companion client (`opx`).
+It coalesces concurrent secret reads across processes, caches results briefly, and provides a secure
+local API over a TLS-encrypted Unix domain socket with comprehensive access controls.
 
-> **Status:** Prototype. Linux/macOS (Unix socket). Windows named-pipe support would be a follow-up.
+> **Status:** Production-ready. Linux/macOS (Unix socket). Windows named-pipe support planned.
 
 ## Why?
 Toolchains that shell out to `op read ...` many times end up spamming auth prompts and duplicate API calls.
@@ -40,10 +40,10 @@ gh release download -R zach-source/opx
 gh release download v1.0.0 -R zach-source/opx
 
 # Make binaries executable
-chmod +x op-authd-* opx-*
+chmod +x opx-authd-* opx-*
 
 # Rename for your platform (example for Linux x86_64)
-mv op-authd-linux-amd64 op-authd
+mv opx-authd-linux-amd64 opx-authd
 mv opx-linux-amd64 opx
 ```
 
@@ -63,33 +63,38 @@ gpg --verify checksums.txt.sig checksums.txt
 git clone https://github.com/zach-source/opx.git
 cd opx
 make build
-# Binaries in ./bin: op-authd, opx
+# Binaries in ./bin: opx-authd, opx
 ```
 
 ## Run Daemon
 ```bash
 # Default configuration (8-hour session timeout)
-./bin/op-authd --ttl 120 --verbose
+./bin/opx-authd --ttl 120 --verbose
 
 # Custom session timeout (4 hours)
-./bin/op-authd --ttl 120 --session-timeout 4 --verbose
+./bin/opx-authd --ttl 120 --session-timeout 4 --verbose
+
+# Enable audit logging for security compliance
+./bin/opx-authd --ttl 120 --enable-audit-log --verbose
 
 # Disable session management 
-./bin/op-authd --ttl 120 --enable-session-lock=false --verbose
+./bin/opx-authd --ttl 120 --enable-session-lock=false --verbose
 
-# All session options
-./bin/op-authd \
+# All security options enabled
+./bin/opx-authd \
   --ttl 120 \
   --session-timeout 8 \
   --enable-session-lock=true \
   --lock-on-auth-failure=true \
+  --enable-audit-log \
   --verbose
 ```
 
-### Session Management Options
+### Security Options
 - `--session-timeout=8` - Idle timeout in hours (0 to disable, default: 8)
 - `--enable-session-lock=true` - Enable session idle timeout and locking 
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
+- `--enable-audit-log` - Enable structured audit logging to file
 
 ## Environment Variables
 
@@ -130,7 +135,7 @@ The client will attempt to autostart the daemon if it can't connect. You can dis
 - Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows
 - **Command injection protection** with comprehensive input validation
 - **Race condition protection** with atomic file operations
-- This is a prototype: **do not** expose the socket to other users or mount it across trust boundaries.
+- **Enterprise-ready**: Comprehensive security with audit logging and access controls
 
 ## File Locations
 
@@ -188,23 +193,52 @@ Create a policy file at `$XDG_CONFIG_HOME/op-authd/policy.json` (or `~/.config/o
 - **Empty policy**: All processes allowed unless `default_deny: true`
 - **Policy exists**: Only explicitly allowed processes can access matching references
 
+## Audit Logging
+
+Enable comprehensive security audit logging with `--enable-audit-log`:
+
+```bash
+./bin/opx-authd --enable-audit-log --verbose
+```
+
+### Audit Log Features
+
+- **Structured JSON logging**: Each event recorded as structured JSON in `audit.log`
+- **Access decisions**: Every policy decision logged with process and reference details
+- **Authentication events**: Token validation attempts and outcomes
+- **Session events**: Session lock/unlock operations
+- **Process tracking**: Complete process information (PID, path, UID/GID where available)
+
+### Audit Log Location
+
+- **XDG**: `$XDG_DATA_HOME/op-authd/audit.log` (fallback: `~/.local/share/op-authd/audit.log`)
+- **Legacy**: `~/.op-authd/audit.log` (if legacy directory exists)
+
+### Example Audit Events
+
+```json
+{"timestamp":"2025-09-05T15:30:45Z","event":"ACCESS_DECISION","peer_info":{"PID":12345,"Path":"/usr/bin/kubectl"},"reference":"op://Production/k8s/token","decision":"ALLOW","policy_path":"~/.config/op-authd/policy.json"}
+{"timestamp":"2025-09-05T15:31:02Z","event":"ACCESS_DECISION","peer_info":{"PID":12346,"Path":"/tmp/malicious"},"reference":"op://Production/admin/key","decision":"DENY","policy_path":"~/.config/op-authd/policy.json"}
+```
+
 ## Systemd (user) example
 ```ini
-# ~/.config/systemd/user/op-authd.service
+# ~/.config/systemd/user/opx-authd.service
 [Unit]
-Description=op-authd prototype
+Description=opx-authd - 1Password CLI Batching Daemon
 After=default.target
 
 [Service]
-ExecStart=%h/op-authd-proto/bin/op-authd --ttl 120 --verbose
+ExecStart=%h/opx/bin/opx-authd --ttl 120 --enable-audit-log --verbose
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=default.target
 ```
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now op-authd
+systemctl --user enable --now opx-authd
 ```
 
 ## Implementation sketch
