@@ -130,15 +130,22 @@ func (v *Vault) ensureAuthenticated(ctx context.Context) error {
 
 // authenticate performs Vault authentication
 func (v *Vault) authenticate(ctx context.Context) error {
-	// For now, implement token-based auth
-	// TODO: Add support for other auth methods (userpass, etc.)
-
-	if v.config.AuthMethod == "token" {
+	switch v.config.AuthMethod {
+	case "token":
 		// Token auth - just verify the token works
 		return v.verifyToken(ctx)
+	case "userpass":
+		return v.authenticateUserpass(ctx)
+	default:
+		return fmt.Errorf("authentication method %s not yet implemented", v.config.AuthMethod)
 	}
+}
 
-	return fmt.Errorf("authentication method %s not yet implemented", v.config.AuthMethod)
+// authenticateUserpass performs username/password authentication
+func (v *Vault) authenticateUserpass(ctx context.Context) error {
+	// This would typically prompt for credentials or read from environment
+	// For now, return an error with instructions
+	return fmt.Errorf("userpass authentication requires environment variables VAULT_USERNAME and VAULT_PASSWORD")
 }
 
 // verifyToken checks if the current token is valid

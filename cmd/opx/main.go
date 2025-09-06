@@ -25,6 +25,7 @@ Usage:
   opx status
   opx audit [--since=24h] [--interactive]
   opx login [--account=ACCOUNT]
+  opx vault-login [--address=URL] [--method=userpass]
 
 Commands:
   read                  # Read secret references (op://, vault://, bao://)
@@ -33,6 +34,7 @@ Commands:
   status               # Check daemon status
   audit                # Manage access control policies
   login                # Login to 1Password account
+  vault-login          # Login to HashiCorp Vault or OpenBao
 
 Global Flags:
   --account=ACCOUNT     # 1Password account to use
@@ -100,6 +102,9 @@ func main() {
 		return
 	case "login":
 		handleLoginCommand(opFlags)
+		return
+	case "vault-login":
+		handleVaultLoginCommand(cmdArgs)
 		return
 	}
 
@@ -388,4 +393,48 @@ func handleLoginCommand(opFlags []string) {
 	fmt.Println("✅ Successfully logged into 1Password")
 	fmt.Println("You can now use opx to read secrets:")
 	fmt.Println("  opx read 'op://vault/item/field'")
+}
+
+func handleVaultLoginCommand(args []string) {
+	var address string
+	var method string
+
+	// Parse vault-login specific flags
+	vaultFlags := flag.NewFlagSet("vault-login", flag.ExitOnError)
+	vaultFlags.StringVar(&address, "address", "http://localhost:8200", "Vault server address")
+	vaultFlags.StringVar(&method, "method", "userpass", "authentication method (token|userpass)")
+	vaultFlags.Parse(args)
+
+	fmt.Printf("Logging into Vault at %s using %s authentication...\n", address, method)
+
+	switch method {
+	case "token":
+		fmt.Println("For token authentication, set the VAULT_TOKEN environment variable:")
+		fmt.Println("  export VAULT_TOKEN=your-vault-token")
+		fmt.Println("Then start the daemon with:")
+		fmt.Printf("  ./bin/opx-authd --backend=vault --verbose\n")
+
+	case "userpass":
+		fmt.Println("For userpass authentication:")
+		fmt.Println("1. Set environment variables:")
+		fmt.Println("   export VAULT_ADDR=" + address)
+		fmt.Println("   export VAULT_USERNAME=your-username")
+		fmt.Println("   export VAULT_PASSWORD=your-password")
+		fmt.Println("")
+		fmt.Println("2. Or use vault CLI to login:")
+		fmt.Println("   vault auth -method=userpass username=your-username")
+		fmt.Println("")
+		fmt.Println("3. Start daemon:")
+		fmt.Println("   ./bin/opx-authd --backend=vault --verbose")
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unsupported authentication method: %s\n", method)
+		fmt.Println("Supported methods: token, userpass")
+		os.Exit(1)
+	}
+
+	fmt.Println("")
+	fmt.Println("After authentication, you can read Vault secrets:")
+	fmt.Println("  opx read 'vault://secret/myapp/config#password'")
+	fmt.Println("  opx read 'bao://kv/production/api#key'")
 }

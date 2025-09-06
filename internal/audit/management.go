@@ -23,63 +23,78 @@ type DenialEvent struct {
 	Count     int       `json:"count"` // How many times this combination was denied
 }
 
-// ScanRecentDenials reads audit log and returns recent denial events
+// ScanRecentDenials reads audit logs and returns recent denial events
 func ScanRecentDenials(since time.Duration) ([]DenialEvent, error) {
-	// Find audit log file
-	dataDir, err := util.DataDir()
+	// Create a roller to find log files
+	roller, err := NewRoller(DefaultRollerConfig())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get data directory: %w", err)
+		return nil, fmt.Errorf("failed to create roller: %w", err)
+	}
+	defer roller.Close()
+
+	// Get list of log files to scan
+	logFiles, err := roller.ListLogFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list log files: %w", err)
 	}
 
-	auditPath := filepath.Join(dataDir, "audit.log")
-	file, err := os.Open(auditPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []DenialEvent{}, nil // No audit log exists yet
-		}
-		return nil, fmt.Errorf("failed to open audit log: %w", err)
+	if len(logFiles) == 0 {
+		return []DenialEvent{}, nil // No audit logs exist yet
 	}
-	defer file.Close()
 
-	// Parse denial events
+	// Parse denial events from all relevant log files
 	denials := make(map[string]*DenialEvent)
 	cutoff := time.Now().Add(-since)
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
+	for _, logFile := range logFiles {
+		file, err := os.Open(logFile)
+		if err != nil {
+			continue // Skip files we can't open
 		}
 
-		var event AuditEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue // Skip malformed lines
-		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
 
-		// Only interested in recent access denials
-		if event.Event != "ACCESS_DECISION" || event.Decision != "DENY" || event.Timestamp.Before(cutoff) {
-			continue
-		}
+			var event AuditEvent
+			if err := json.Unmarshal([]byte(line), &event); err != nil {
+				continue // Skip malformed lines
+			}
 
-		// Create unique key for this process+reference combination
-		key := fmt.Sprintf("%s|%s", event.PeerInfo.Path, event.Reference)
+			// Only interested in recent access denials
+			if event.Event != "ACCESS_DECISION" || event.Decision != "DENY" || event.Timestamp.Before(cutoff) {
+				continue
+			}
 
-		if existing, exists := denials[key]; exists {
-			existing.Count++
-		} else {
-			denials[key] = &DenialEvent{
-				Timestamp: event.Timestamp,
-				PID:       event.PeerInfo.PID,
-				Path:      event.PeerInfo.Path,
-				Reference: event.Reference,
-				Count:     1,
+			// Create unique key for this process+reference combination
+			key := fmt.Sprintf("%s|%s", event.PeerInfo.Path, event.Reference)
+
+			if existing, exists := denials[key]; exists {
+				existing.Count++
+				// Keep the most recent timestamp
+				if event.Timestamp.After(existing.Timestamp) {
+					existing.Timestamp = event.Timestamp
+				}
+			} else {
+				denials[key] = &DenialEvent{
+					Timestamp: event.Timestamp,
+					PID:       event.PeerInfo.PID,
+					Path:      event.PeerInfo.Path,
+					Reference: event.Reference,
+					Count:     1,
+				}
 			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading audit log: %w", err)
+		if err := scanner.Err(); err != nil {
+			// Log error but continue with other files
+			continue
+		}
+
+		file.Close()
 	}
 
 	// Convert to slice and sort by count (most frequent first)

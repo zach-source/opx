@@ -2,14 +2,12 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/zach-source/opx/internal/security"
-	"github.com/zach-source/opx/internal/util"
 )
 
 // AuditEvent represents a security audit event
@@ -23,33 +21,31 @@ type AuditEvent struct {
 	Details    map[string]string `json:"details,omitempty"`
 }
 
-// Logger handles audit event logging
+// Logger handles audit event logging with rotation
 type Logger struct {
 	enabled bool
-	logFile *os.File
+	roller  *Roller
 }
 
-// NewLogger creates a new audit logger
+// NewLogger creates a new audit logger with configurable rotation
 func NewLogger(enabled bool) (*Logger, error) {
+	return NewLoggerWithConfig(enabled, DefaultRollerConfig())
+}
+
+// NewLoggerWithConfig creates a new audit logger with custom rotation config
+func NewLoggerWithConfig(enabled bool, config RollerConfig) (*Logger, error) {
 	if !enabled {
 		return &Logger{enabled: false}, nil
 	}
 
-	// Create audit log in data directory
-	dataDir, err := util.DataDir()
+	roller, err := NewRoller(config)
 	if err != nil {
-		return nil, err
-	}
-
-	logPath := filepath.Join(dataDir, "audit.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create log roller: %w", err)
 	}
 
 	return &Logger{
 		enabled: true,
-		logFile: logFile,
+		roller:  roller,
 	}, nil
 }
 
@@ -61,12 +57,11 @@ func (l *Logger) LogEvent(event AuditEvent) {
 
 	event.Timestamp = time.Now()
 
-	// Log to structured audit file
-	if l.logFile != nil {
+	// Log to structured audit file with rotation
+	if l.roller != nil {
 		data, err := json.Marshal(event)
 		if err == nil {
-			l.logFile.WriteString(string(data) + "\n")
-			l.logFile.Sync()
+			l.roller.Write(append(data, '\n'))
 		}
 	}
 
@@ -132,8 +127,8 @@ func (l *Logger) LogAuthenticationEvent(peerInfo security.PeerInfo, success bool
 
 // Close closes the audit logger
 func (l *Logger) Close() error {
-	if l.logFile != nil {
-		return l.logFile.Close()
+	if l.roller != nil {
+		return l.roller.Close()
 	}
 	return nil
 }

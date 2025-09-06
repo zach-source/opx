@@ -26,6 +26,7 @@ func main() {
 	var enableSessionLock bool
 	var lockOnAuthFailure bool
 	var enableAuditLog bool
+	var auditLogRetentionDays int
 
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
@@ -35,6 +36,7 @@ func main() {
 	flag.BoolVar(&enableSessionLock, "enable-session-lock", true, "enable session idle timeout and locking")
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
+	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
 	flag.Parse()
 
 	// Load session configuration from environment/file, then override with flags
@@ -112,12 +114,26 @@ func main() {
 		log.Printf("Loaded access policy from %s", policyPath)
 	}
 
-	// Create audit logger
-	auditLogger, err := audit.NewLogger(enableAuditLog)
-	if err != nil {
-		log.Fatalf("Failed to create audit logger: %v", err)
+	// Create audit logger with rotation configuration
+	var auditLogger *audit.Logger
+	if enableAuditLog {
+		rollerConfig := audit.RollerConfig{
+			MaxDays:       auditLogRetentionDays,
+			CompressOld:   false,
+			RotateOnStart: true,
+			FlushInterval: 5 * time.Second,
+		}
+		auditLogger, err = audit.NewLoggerWithConfig(true, rollerConfig)
+		if err != nil {
+			log.Fatalf("Failed to create audit logger: %v", err)
+		}
+		defer auditLogger.Close()
+	} else {
+		auditLogger, err = audit.NewLogger(false)
+		if err != nil {
+			log.Fatalf("Failed to create audit logger: %v", err)
+		}
 	}
-	defer auditLogger.Close()
 
 	if enableAuditLog && verbose {
 		log.Printf("Audit logging enabled")
