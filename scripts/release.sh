@@ -4,8 +4,6 @@ set -euo pipefail
 # Release script using GoReleaser for opx
 # Handles versioning, building, signing, and GitHub release creation
 
-VERSION=$(cat VERSION)
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,6 +15,14 @@ info() { echo -e "${BLUE}ℹ ${1}${NC}"; }
 success() { echo -e "${GREEN}✅ ${1}${NC}"; }
 warn() { echo -e "${YELLOW}⚠ ${1}${NC}"; }
 error() { echo -e "${RED}❌ ${1}${NC}"; exit 1; }
+
+# Use svu to determine next version based on conventional commits
+SVU_BIN=$(go env GOPATH)/bin/svu
+if [[ ! -x "$SVU_BIN" ]]; then
+    error "svu is required. Install: go install github.com/caarlos0/svu@latest"
+fi
+
+VERSION=$($SVU_BIN next)
 
 # Check prerequisites
 GORELEASER_BIN=$(go env GOPATH)/bin/goreleaser

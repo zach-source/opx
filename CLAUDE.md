@@ -223,15 +223,28 @@ DRY_RUN=true ./scripts/release.sh
 
 ### Release Process
 ```bash
-# Update VERSION file
-echo "v1.0.1" > VERSION
+# Make changes and commit using conventional commits
+git commit -m "feat: add new feature"
+git commit -m "fix: resolve cache issue"
 
-# Commit changes
-git add -A && git commit -m "feat: prepare for release"
-
-# Create release (requires GitHub CLI and GoReleaser)
+# Create release (automatically determines version based on commits)
 ./scripts/release.sh
 ```
+
+### Conventional Commits
+The project uses [Conventional Commits](https://www.conventionalcommits.org/) with automatic semantic versioning via [svu](https://github.com/caarlos0/svu):
+
+**Commit Types:**
+- `feat:` - New features (minor version bump)
+- `fix:` - Bug fixes (patch version bump)  
+- `docs:` - Documentation changes
+- `security:` - Security improvements
+- `perf:` - Performance improvements
+- `refactor:` - Code refactoring
+- `test:` - Test additions/fixes
+- `chore:` - Build/dependency changes
+
+**Breaking Changes:** Add `!` after type (e.g., `feat!:`) or include `BREAKING CHANGE:` in footer (major version bump)
 
 ### Signing Configuration (Optional)
 

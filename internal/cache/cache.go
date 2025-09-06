@@ -4,10 +4,12 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/zach-source/opx/internal/safestring"
 )
 
 type entry struct {
-	v      string
+	v      *safestring.SafeString
 	exp    time.Time
 	cached time.Time
 }
@@ -38,13 +40,19 @@ func (c *Cache) Get(key string) (string, bool, time.Time, time.Time) {
 		}
 		return "", false, time.Time{}, time.Time{}
 	}
-	return e.v, true, e.exp, e.cached
+	return e.v.String(), true, e.exp, e.cached
 }
 
 func (c *Cache) Set(key, val string) {
 	c.mu.Lock()
-	c.data[key] = entry{v: val, exp: time.Now().Add(c.ttl), cached: time.Now()}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+
+	// Zero any existing entry before replacing
+	if existing, exists := c.data[key]; exists {
+		existing.v.Zero()
+	}
+
+	c.data[key] = entry{v: safestring.New(val), exp: time.Now().Add(c.ttl), cached: time.Now()}
 }
 
 func (c *Cache) Stats() (size int, hits, misses int64, inflight int) {
@@ -96,10 +104,8 @@ func (c *Cache) CleanupExpired() int {
 	removed := 0
 	for key, entry := range c.data {
 		if now.After(entry.exp) {
-			// Best effort zeroization before removal
-			// Note: ZeroizeString may not work reliably in all cases due to Go's
-			// string immutability and GC behavior. This is a best-effort security measure.
-			ZeroizeString(&entry.v)
+			// Securely zero the SafeString before removal
+			entry.v.Zero()
 			delete(c.data, key)
 			removed++
 		}
@@ -113,9 +119,9 @@ func (c *Cache) Clear() int {
 	defer c.mu.Unlock()
 
 	removed := len(c.data)
-	for key := range c.data {
-		// Note: ZeroizeString is unsafe for Go strings and can cause crashes
-		// We skip zeroization here for safety. The GC will eventually clean up.
+	for key, entry := range c.data {
+		// Securely zero the SafeString before removal
+		entry.v.Zero()
 		delete(c.data, key)
 	}
 	return removed

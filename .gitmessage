@@ -1,0 +1,27 @@
+# Conventional Commits Template
+# 
+# Type: Description (50 chars max)
+#
+# Types:
+#   feat:     New feature
+#   fix:      Bug fix  
+#   docs:     Documentation changes
+#   style:    Code style changes (formatting, etc.)
+#   refactor: Code refactoring without functional changes
+#   perf:     Performance improvements
+#   test:     Adding or fixing tests
+#   chore:    Build process, dependencies, etc.
+#   ci:       CI/CD changes
+#   security: Security improvements
+#
+# Examples:
+#   feat: add session idle timeout with 8-hour default
+#   fix: resolve race condition in cache operations
+#   docs: update README with installation instructions
+#   security: implement peer credential validation
+#
+# Optional body (wrap at 72 chars):
+
+# Optional footer:
+# Breaking Change: describe any breaking changes
+# Closes #123: reference issue numbers
