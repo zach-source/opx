@@ -167,3 +167,25 @@ func FormatDenialForDisplay(i int, denial DenialEvent) string {
 		denial.Count,
 		denial.Timestamp.Format("2006-01-02 15:04:05"))
 }
+
+// FilterDenialsByPath filters denials for a specific executable path using generics
+func FilterDenialsByPath(denials []DenialEvent, path string) []DenialEvent {
+	return util.Filter(denials, func(d DenialEvent) bool {
+		return d.Path == path
+	})
+}
+
+// GroupDenialsByPath groups denials by executable path using generics
+func GroupDenialsByPath(denials []DenialEvent) map[string][]DenialEvent {
+	return util.GroupBy(denials, func(d DenialEvent) string {
+		return d.Path
+	})
+}
+
+// FindMostFrequentDenial finds the denial with the highest count using generics
+func FindMostFrequentDenial(denials []DenialEvent) (DenialEvent, bool) {
+	return util.FindFirst(denials, func(d DenialEvent) bool {
+		// Since denials are sorted by count desc, the first one is most frequent
+		return true
+	})
+}
