@@ -20,10 +20,17 @@ import (
 
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
+	"github.com/zach-source/opx/internal/policy"
 	"github.com/zach-source/opx/internal/protocol"
+	"github.com/zach-source/opx/internal/security"
 	"github.com/zach-source/opx/internal/session"
 	"github.com/zach-source/opx/internal/util"
 )
+
+// Context key for peer information
+type contextKey string
+
+const peerInfoKey = contextKey("peerInfo")
 
 type Server struct {
 	SockPath string
@@ -31,6 +38,7 @@ type Server struct {
 	Cache    *cache.Cache
 	Backend  backend.Backend
 	Session  *session.Manager
+	Policy   policy.Policy
 	Verbose  bool
 
 	sf singleflight.Group
@@ -78,12 +86,15 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/status", s.auth(s.handleStatus))
-	mux.HandleFunc("/v1/read", s.auth(s.handleRead))
-	mux.HandleFunc("/v1/reads", s.auth(s.handleReads))
-	mux.HandleFunc("/v1/resolve", s.auth(s.handleResolve))
+	mux.HandleFunc("/v1/read", s.authWithPolicy(s.handleRead))
+	mux.HandleFunc("/v1/reads", s.authWithPolicy(s.handleReads))
+	mux.HandleFunc("/v1/resolve", s.authWithPolicy(s.handleResolve))
 	mux.HandleFunc("/v1/session/unlock", s.auth(s.handleSessionUnlock))
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{
+		Handler:     mux,
+		ConnContext: s.peerConnContext,
+	}
 
 	// Start periodic cache cleanup
 	go s.startCacheCleanup(ctx)
@@ -132,6 +143,21 @@ func (s *Server) setupSessionLockCallback() {
 	s.Session.SetCallbacks(lockCallback, unlockCallback)
 }
 
+// peerConnContext extracts peer information from Unix socket connections
+func (s *Server) peerConnContext(ctx context.Context, conn net.Conn) context.Context {
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		if peerInfo, err := security.PeerFromUnixConn(unixConn); err == nil {
+			ctx = context.WithValue(ctx, peerInfoKey, peerInfo)
+			if s.Verbose {
+				log.Printf("[security] peer connection: %s", peerInfo.String())
+			}
+		} else if s.Verbose {
+			log.Printf("[security] failed to get peer info: %v", err)
+		}
+	}
+	return ctx
+}
+
 func (s *Server) CacheTTL() time.Duration {
 	return s.Cache.TTL()
 }
@@ -169,6 +195,47 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// authWithPolicy combines token auth with policy-based access control
+func (s *Server) authWithPolicy(next http.HandlerFunc) http.HandlerFunc {
+	return s.auth(func(w http.ResponseWriter, r *http.Request) {
+		// Extract peer information from context
+		peerInfo, hasPeer := r.Context().Value(peerInfoKey).(security.PeerInfo)
+		if !hasPeer {
+			if s.Verbose {
+				log.Printf("[security] no peer information available for policy check")
+			}
+			// If we can't get peer info, fall back to basic auth (for backward compatibility)
+			next(w, r)
+			return
+		}
+
+		// Store peer info in request context for use by handlers
+		ctx := context.WithValue(r.Context(), peerInfoKey, peerInfo)
+		r = r.WithContext(ctx)
+		next(w, r)
+	})
+}
+
+// validateAccess checks if peer is allowed to access the given reference
+func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
+	subject := policy.Subject{
+		PID:  peerInfo.PID,
+		Path: peerInfo.Path,
+	}
+
+	allowed := policy.Allowed(s.Policy, subject, ref)
+
+	if s.Verbose {
+		if allowed {
+			log.Printf("[security] access granted: %s -> %s", peerInfo.String(), ref)
+		} else {
+			log.Printf("[security] access denied: %s -> %s", peerInfo.String(), ref)
+		}
+	}
+
+	return allowed
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +374,13 @@ func (s *Server) readOne(ctx context.Context, ref string) (protocol.ReadResponse
 }
 
 func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []string) (protocol.ReadResponse, error) {
+	// Check access policy if peer information is available
+	if peerInfo, hasPeer := ctx.Value(peerInfoKey).(security.PeerInfo); hasPeer {
+		if !s.validateAccess(peerInfo, ref) {
+			return protocol.ReadResponse{}, fmt.Errorf("access denied by policy")
+		}
+	}
+
 	// Create cache key that includes flags for proper cache isolation
 	cacheKey := ref
 	if len(flags) > 0 {

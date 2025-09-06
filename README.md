@@ -120,6 +120,8 @@ The client will attempt to autostart the daemon if it can't connect. You can dis
 
 ## Security Notes
 - **TLS encryption** over Unix domain socket protects all client-server communication
+- **Peer credential validation** extracts calling process information for access control
+- **Policy-based access control** restricts secret access by process path/PID and reference patterns
 - **XDG Base Directory compliant**: Respects `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_RUNTIME_DIR` 
 - **Backward compatibility**: Existing `~/.op-authd/` installations continue to work
 - The socket directory is `0700`, token is `0600`. Only your user should be able to talk to the daemon.
@@ -145,6 +147,46 @@ The tool follows XDG Base Directory specification with backward compatibility:
 ### Runtime Files (socket)
 - **XDG**: `$XDG_RUNTIME_DIR/op-authd/socket.sock` (fallback: same as data dir)
 - **Legacy**: `~/.op-authd/socket.sock` (used if directory already exists)
+
+## Access Control Policy
+
+The daemon supports optional policy-based access control to restrict which processes can access which secrets.
+
+### Policy Configuration
+
+Create a policy file at `$XDG_CONFIG_HOME/op-authd/policy.json` (or `~/.config/op-authd/policy.json`):
+
+```json
+{
+  "allow": [
+    {
+      "path": "/usr/local/bin/deployment-tool",
+      "refs": ["op://Production/*"]
+    },
+    {
+      "path": "/usr/bin/approved-app", 
+      "refs": ["op://Development/*", "op://Testing/*"]
+    }
+  ],
+  "default_deny": true
+}
+```
+
+### Policy Rules
+
+- **`path`**: Absolute path to executable (must match exactly)
+- **`path_sha256`**: SHA256 hash of executable path (alternative to `path`)
+- **`pid`**: Exact process ID (useful for temporary access)
+- **`refs`**: Array of allowed reference patterns
+  - `"*"` - Allow all references
+  - `"op://vault/*"` - Allow all references in vault
+  - `"op://vault/item/field"` - Allow exact reference
+
+### Default Behavior
+
+- **No policy file**: All processes allowed (current behavior)
+- **Empty policy**: All processes allowed unless `default_deny: true`
+- **Policy exists**: Only explicitly allowed processes can access matching references
 
 ## Systemd (user) example
 ```ini

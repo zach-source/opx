@@ -79,6 +79,17 @@ The project follows a clean layered architecture with clear separation of concer
 - Environment variable and config file support
 - Zero external dependencies (pure Go standard library)
 
+**Security Layer (`internal/security/`)**
+- Unix socket peer credential extraction (PID, UID, GID, executable path)
+- Cross-platform support for Linux and macOS peer validation
+- Process identification for access control enforcement
+
+**Policy Layer (`internal/policy/`)**
+- JSON-configurable access control rules
+- Process path and PID-based restrictions
+- Reference pattern matching (wildcards supported)
+- Default allow/deny behavior configuration
+
 **Protocol Layer (`internal/protocol/`)**
 - JSON request/response structs for all API endpoints
 - Clean separation between wire format and internal logic
@@ -93,6 +104,8 @@ The project follows a clean layered architecture with clear separation of concer
 3. **Backend pluggability**: Interface-based design allows easy swapping between production (`opcli`) and test (`fake`) backends
 
 4. **Cache-aside pattern**: Manual cache management with explicit cache checks and population
+
+5. **Defense in depth security**: Multiple security layers (TLS, tokens, peer validation, policies, session management)
 
 ## API Endpoints
 
@@ -131,6 +144,8 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 ## Security Considerations
 
 - **TLS Encryption**: All communication over Unix socket is TLS-encrypted with self-signed certificates
+- **Peer Credential Validation**: Extracts calling process PID, UID, and executable path for access control
+- **Policy-Based Access Control**: Optional JSON configuration restricts access by process and reference patterns
 - **XDG Compliance**: Follows XDG Base Directory specification for config/data separation
 - **Socket Security**: Socket path with 0700 directory permissions (XDG runtime dir or legacy ~/.op-authd/)
 - **Authentication**: Token stored with 0600 permissions (XDG data dir or legacy ~/.op-authd/)  
@@ -146,7 +161,9 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 The application follows XDG Base Directory specification with backward compatibility:
 
 ### XDG-Compliant Paths (New Installations)
-- **Config**: `$XDG_CONFIG_HOME/op-authd/config.json` (fallback: `~/.config/op-authd/config.json`)
+- **Config**: `$XDG_CONFIG_HOME/op-authd/` (fallback: `~/.config/op-authd/`)
+  - `config.json` - Session management configuration
+  - `policy.json` - Access control policy (optional)
 - **Data**: `$XDG_DATA_HOME/op-authd/` (fallback: `~/.local/share/op-authd/`)
   - `token` - Authentication token
   - `cert.pem`, `key.pem` - TLS certificates
@@ -154,7 +171,7 @@ The application follows XDG Base Directory specification with backward compatibi
 
 ### Legacy Paths (Existing Installations)
 - **All files**: `~/.op-authd/` (used when directory already exists)
-  - `config.json`, `token`, `cert.pem`, `key.pem`, `socket.sock`
+  - `config.json`, `policy.json`, `token`, `cert.pem`, `key.pem`, `socket.sock`
 
 ## Testing Strategy
 

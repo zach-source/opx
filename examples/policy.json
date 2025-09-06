@@ -1,0 +1,21 @@
+{
+  "allow": [
+    {
+      "path": "/usr/bin/approved-app",
+      "refs": ["op://Development/*", "op://Testing/*"]
+    },
+    {
+      "path": "/usr/local/bin/deployment-tool",
+      "refs": ["op://Production/*"]
+    },
+    {
+      "path_sha256": "a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0",
+      "refs": ["op://CI/*"]
+    },
+    {
+      "pid": 12345,
+      "refs": ["op://Staging/api/key"]
+    }
+  ],
+  "default_deny": true
+}

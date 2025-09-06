@@ -11,6 +11,7 @@ import (
 
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
+	"github.com/zach-source/opx/internal/policy"
 	"github.com/zach-source/opx/internal/server"
 	"github.com/zach-source/opx/internal/session"
 )
@@ -73,11 +74,21 @@ func main() {
 		log.Fatalf("unknown backend: %s", backendName)
 	}
 
+	// Load access policy
+	accessPolicy, policyPath, err := policy.Load()
+	if err != nil {
+		log.Printf("Warning: failed to load access policy from %s: %v, using defaults", policyPath, err)
+		accessPolicy = policy.Policy{Allow: []policy.Rule{}, DefaultDeny: false}
+	} else if verbose {
+		log.Printf("Loaded access policy from %s", policyPath)
+	}
+
 	srv := &server.Server{
 		SockPath: sock,
 		Backend:  be,
 		Cache:    cache.New(time.Duration(ttlSec) * time.Second),
 		Session:  sessionManager,
+		Policy:   accessPolicy,
 		Verbose:  verbose,
 	}
 
