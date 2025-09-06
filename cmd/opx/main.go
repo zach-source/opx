@@ -24,13 +24,15 @@ Usage:
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
   opx audit [--since=24h] [--interactive]
+  opx login [--account=ACCOUNT]
 
 Commands:
-  read                  # Read secret references
+  read                  # Read secret references (op://, vault://, bao://)
   resolve              # Resolve environment variables  
   run                  # Run command with resolved env vars
   status               # Check daemon status
   audit                # Manage access control policies
+  login                # Login to 1Password account
 
 Global Flags:
   --account=ACCOUNT     # 1Password account to use
@@ -91,9 +93,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "client init:", err)
 		os.Exit(1)
 	}
-	// Handle audit command separately (doesn't need daemon connection)
-	if cmd == "audit" {
+	// Handle commands that don't need daemon connection
+	switch cmd {
+	case "audit":
 		handleAuditCommand(cmdArgs)
+		return
+	case "login":
+		handleLoginCommand(opFlags)
 		return
 	}
 
@@ -355,4 +361,31 @@ func parseSelection(input string) []int {
 	}
 
 	return indices
+}
+
+func handleLoginCommand(opFlags []string) {
+	fmt.Println("Logging into 1Password...")
+
+	// Build op signin command with optional account flag
+	args := []string{"signin"}
+	args = append(args, opFlags...)
+
+	// Execute op signin interactively
+	cmd := exec.Command("op", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			fmt.Fprintf(os.Stderr, "1Password signin failed with exit code %d\n", exitErr.ExitCode())
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Fprintf(os.Stderr, "Failed to execute 1Password signin: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("✅ Successfully logged into 1Password")
+	fmt.Println("You can now use opx to read secrets:")
+	fmt.Println("  opx read 'op://vault/item/field'")
 }

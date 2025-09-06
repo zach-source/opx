@@ -1,24 +1,27 @@
 
 # opx - 1Password CLI Batching Daemon
 
-A **1Password CLI batching daemon** (`opx-authd`) with a companion client (`opx`).
-It coalesces concurrent secret reads across processes, caches results briefly, and provides a secure
-local API over a TLS-encrypted Unix domain socket with comprehensive access controls.
+A **multi-backend secret batching daemon** (`opx-authd`) with a companion client (`opx`).
+It coalesces concurrent secret reads across processes from multiple sources (1Password, HashiCorp Vault, OpenBao), 
+caches results briefly, and provides a secure local API over a TLS-encrypted Unix domain socket with comprehensive access controls.
 
 > **Status:** Production-ready. Linux/macOS (Unix socket). Windows named-pipe support planned.
 
 ## Why?
-Toolchains that shell out to `op read ...` many times end up spamming auth prompts and duplicate API calls.
-This daemon centralizes those reads, **coalesces identical in-flight requests**, and **short-caches** results.
+Toolchains that shell out to secret management CLIs (`op read`, `vault kv get`, etc.) many times end up spamming auth prompts and duplicate API calls.
+This daemon centralizes those reads from multiple sources, **coalesces identical in-flight requests**, and **short-caches** results.
 
 ## Features
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
 - Bearer token with secure permissions (0600) and directory perms 0700
 - **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
 - In-memory TTL cache (default 120s) with single-flight coalescing and security clearing
-- Backends:
-  - `opcli` (default): shells out to `op read <ref>` and relies on 1Password's built-in auth/daemon
-  - `fake`: returns deterministic dummy values for testing (`export OP_AUTHD_BACKEND=fake`)
+- **Multi-backend support**:
+  - `opcli`: 1Password CLI integration with `op://` references
+  - `vault`: HashiCorp Vault with `vault://` references  
+  - `bao`: OpenBao with `bao://` references
+  - `multi`: Route requests to appropriate backend based on URI scheme
+  - `fake`: Deterministic dummy values for testing
 - Endpoints:
   - `POST /v1/read` – read a single ref
   - `POST /v1/reads` – batch read multiple refs
@@ -68,20 +71,21 @@ make build
 
 ## Run Daemon
 ```bash
-# Default configuration (8-hour session timeout)
-./bin/opx-authd --ttl 120 --verbose
+# 1Password only (default)
+./bin/opx-authd --backend=opcli --verbose
 
-# Custom session timeout (4 hours)
-./bin/opx-authd --ttl 120 --session-timeout 4 --verbose
+# HashiCorp Vault only
+./bin/opx-authd --backend=vault --verbose
 
-# Enable audit logging for security compliance
-./bin/opx-authd --ttl 120 --enable-audit-log --verbose
+# OpenBao only  
+./bin/opx-authd --backend=bao --verbose
 
-# Disable session management 
-./bin/opx-authd --ttl 120 --enable-session-lock=false --verbose
+# Multi-backend (route based on URI scheme)
+./bin/opx-authd --backend=multi --verbose
 
 # All security options enabled
 ./bin/opx-authd \
+  --backend=multi \
   --ttl 120 \
   --session-timeout 8 \
   --enable-session-lock=true \
@@ -112,14 +116,19 @@ make build
 
 ## Client Usage
 ```bash
-# Single read
-./bin/opx read "op://Engineering/DB/password"
+# Login to 1Password
+./bin/opx login --account=MY_ACCOUNT
 
-# Batch read (multiple args)
-./bin/opx read op://Vault/A/secret1 op://Vault/B/secret2
+# Read from different backends
+./bin/opx read "op://Engineering/DB/password"           # 1Password
+./bin/opx read "vault://secret/myapp/config#password"   # HashiCorp Vault
+./bin/opx read "bao://kv/production/api#key"           # OpenBao
+
+# Batch read from multiple backends
+./bin/opx read op://Vault/A/secret1 vault://secret/B/secret2
 
 # Resolve env vars then run a command locally
-./bin/opx run --env DB_PASS=op://Engineering/DB/password -- -- bash -lc 'echo "db pass: $DB_PASS"'
+./bin/opx run --env DB_PASS=op://Engineering/DB/password --env API_KEY=vault://secret/api#key -- bash -lc 'echo "db pass: $DB_PASS, api: $API_KEY"'
 
 # Check daemon status
 ./bin/opx status
@@ -132,6 +141,33 @@ make build
 ```
 
 The client will attempt to autostart the daemon if it can't connect. You can disable this via `OPX_AUTOSTART=0`.
+
+## Supported URI Schemes
+
+The daemon supports multiple secret backends with different URI schemes:
+
+### 1Password (`op://`)
+```bash
+op://vault/item/field          # Standard 1Password reference
+op://Private/SSH/private_key   # Private vault SSH key
+op://Shared/API/token         # Shared vault API token
+```
+
+### HashiCorp Vault (`vault://`)
+```bash
+vault://secret/data/myapp#password    # KV v2 secret with field
+vault://secret/database              # Entire secret as JSON
+vault://auth/aws/config#access_key   # Auth backend configuration
+```
+
+### OpenBao (`bao://`)
+```bash
+bao://kv/data/production#api_key     # KV secret with field  
+bao://database/config               # Database configuration
+bao://pki/ca_chain                 # PKI certificate chain
+```
+
+**Note**: Vault and Bao backends require proper authentication and configuration. The daemon currently supports token-based authentication.
 
 ## Security Notes
 - **TLS encryption** over Unix domain socket protects all client-server communication

@@ -30,7 +30,7 @@ func main() {
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
 	flag.BoolVar(&verbose, "verbose", true, "verbose logging")
-	flag.StringVar(&backendName, "backend", "opcli", "backend: opcli|fake")
+	flag.StringVar(&backendName, "backend", "opcli", "backend: opcli|fake|vault|bao|multi")
 	flag.IntVar(&sessionTimeout, "session-timeout", int(session.DefaultIdleTimeout.Hours()), "session idle timeout in hours (0 to disable)")
 	flag.BoolVar(&enableSessionLock, "enable-session-lock", true, "enable session idle timeout and locking")
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
@@ -73,6 +73,32 @@ func main() {
 		} else {
 			be = backend.Fake{}
 		}
+	case "vault":
+		// TODO: Load vault config from file
+		vaultConfig := backend.VaultConfig{
+			Address:    "http://localhost:8200", // Default local Vault
+			AuthMethod: "token",
+		}
+		be = backend.NewVault(vaultConfig)
+	case "bao":
+		// TODO: Load bao config from file
+		baoConfig := backend.VaultConfig{
+			Address:    "http://localhost:8300", // Default local Bao
+			AuthMethod: "token",
+		}
+		be = backend.NewBao(baoConfig)
+	case "multi":
+		// Create multi-backend with all backends available
+		opBe := backend.OpCLI{}
+		vaultBe := backend.NewVault(backend.VaultConfig{
+			Address:    "http://localhost:8200",
+			AuthMethod: "token",
+		})
+		baoBe := backend.NewBao(backend.VaultConfig{
+			Address:    "http://localhost:8300",
+			AuthMethod: "token",
+		})
+		be = backend.NewMultiBackend(opBe, vaultBe, baoBe, "op")
 	default:
 		log.Fatalf("unknown backend: %s", backendName)
 	}
