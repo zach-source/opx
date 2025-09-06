@@ -145,7 +145,7 @@ The client will attempt to autostart the daemon if it can't connect. You can dis
 - Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows
 - **Command injection protection** with comprehensive input validation
 - **Race condition protection** with atomic file operations
-- **Enterprise-ready**: Comprehensive security with audit logging and access controls
+- **Production-ready**: Comprehensive security with audit logging and access controls
 
 ## File Locations
 
