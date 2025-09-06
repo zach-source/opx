@@ -1,28 +1,43 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/client"
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `opx - client for op-authd
+	fmt.Fprintf(os.Stderr, `opx - client for opx-authd
 
 Usage:
   opx [--account=ACCOUNT] read REF [REF...]
   opx [--account=ACCOUNT] resolve NAME=REF [NAME=REF ...]
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
+  opx audit [--since=24h] [--interactive]
+
+Commands:
+  read                  # Read secret references
+  resolve              # Resolve environment variables  
+  run                  # Run command with resolved env vars
+  status               # Check daemon status
+  audit                # Manage access control policies
 
 Global Flags:
   --account=ACCOUNT     # 1Password account to use
+
+Audit Flags:
+  --since=24h          # Show denials from last 24 hours (default)
+  --interactive        # Interactive policy management
 
 Environment:
   OPX_AUTOSTART=0       # disable daemon autostart
@@ -76,6 +91,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "client init:", err)
 		os.Exit(1)
 	}
+	// Handle audit command separately (doesn't need daemon connection)
+	if cmd == "audit" {
+		handleAuditCommand(cmdArgs)
+		return
+	}
+
 	if err := cli.EnsureReady(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "daemon:", err)
 		os.Exit(1)
@@ -195,3 +216,143 @@ type multiFlag []string
 
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
+
+func handleAuditCommand(args []string) {
+	var since string
+	var interactive bool
+
+	// Parse audit-specific flags
+	auditFlags := flag.NewFlagSet("audit", flag.ExitOnError)
+	auditFlags.StringVar(&since, "since", "24h", "show denials from last duration (e.g., 1h, 24h, 7d)")
+	auditFlags.BoolVar(&interactive, "interactive", false, "interactive policy management")
+	auditFlags.Parse(args)
+
+	// Parse duration
+	sinceData, err := time.ParseDuration(since)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
+		os.Exit(1)
+	}
+
+	// Scan for recent denials
+	fmt.Printf("Scanning audit log for denials in the last %s...\n", since)
+	denials, err := audit.ScanRecentDenials(sinceData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to scan audit log: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(denials) == 0 {
+		fmt.Printf("No access denials found in the last %s.\n", since)
+		if interactive {
+			fmt.Println("Your access control policy appears to be working correctly!")
+		}
+		return
+	}
+
+	fmt.Printf("\nFound %d unique access denials:\n\n", len(denials))
+
+	// Display all denials
+	for i, denial := range denials {
+		fmt.Print(audit.FormatDenialForDisplay(i, denial))
+	}
+
+	if !interactive {
+		fmt.Println("Use --interactive to manage policy rules for these denials.")
+		return
+	}
+
+	// Interactive mode - let user select denials to allow
+	fmt.Println("\nInteractive Policy Management")
+	fmt.Println("Select denials to create allow rules for (comma-separated numbers, or 'q' to quit):")
+	fmt.Print("> ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to read input: %v\n", err)
+		os.Exit(1)
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "q" || input == "quit" {
+		fmt.Println("Exiting without changes.")
+		return
+	}
+
+	// Parse selection
+	indices := parseSelection(input)
+	if len(indices) == 0 {
+		fmt.Println("No valid selections made.")
+		return
+	}
+
+	// Process each selected denial
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(denials) {
+			fmt.Printf("Invalid selection: %d\n", idx+1)
+			continue
+		}
+
+		denial := denials[idx]
+		fmt.Printf("\nCreating allow rule for: %s -> %s\n", denial.Path, denial.Reference)
+
+		// Suggest patterns
+		patterns := audit.SuggestAllowPattern(denial.Reference)
+		fmt.Println("Select permission level:")
+		for i, pattern := range patterns {
+			fmt.Printf("  [%d] %s\n", i+1, pattern)
+		}
+		fmt.Print("Choice (1-3): ")
+
+		choiceInput, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("Failed to read choice: %v\n", err)
+			continue
+		}
+
+		choice, err := strconv.Atoi(strings.TrimSpace(choiceInput))
+		if err != nil || choice < 1 || choice > len(patterns) {
+			fmt.Printf("Invalid choice, skipping %s\n", denial.Reference)
+			continue
+		}
+
+		selectedPattern := patterns[choice-1]
+		rule := audit.CreatePolicyRuleFromDenial(denial, selectedPattern)
+
+		// Add rule to policy
+		if err := audit.AddRuleToPolicy(rule); err != nil {
+			fmt.Printf("Failed to add rule: %v\n", err)
+			continue
+		}
+
+		fmt.Printf("✅ Added rule: %s can access %s\n", denial.Path, selectedPattern)
+	}
+
+	fmt.Println("\n🎉 Policy updated! Restart opx-authd to apply changes:")
+	fmt.Println("  sudo systemctl --user restart opx-authd")
+	fmt.Println("  # or kill and restart manually")
+}
+
+func parseSelection(input string) []int {
+	var indices []int
+	parts := strings.Split(input, ",")
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Parse number (1-based) and convert to 0-based index
+		num, err := strconv.Atoi(part)
+		if err != nil {
+			continue
+		}
+		if num > 0 {
+			indices = append(indices, num-1)
+		}
+	}
+
+	return indices
+}

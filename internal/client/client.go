@@ -74,16 +74,16 @@ func (c *Client) ensureDaemon(ctx context.Context) error {
 	if os.Getenv("OPX_AUTOSTART") == "0" {
 		return errors.New("daemon not reachable and autostart disabled (OPX_AUTOSTART=0)")
 	}
-	// Attempt to start: call op-authd binary from PATH
-	exe, err := exec.LookPath("op-authd")
+	// Attempt to start: call opx-authd binary from PATH
+	exe, err := exec.LookPath("opx-authd")
 	if err != nil {
-		return fmt.Errorf("op-authd not found in PATH: %w", err)
+		return fmt.Errorf("opx-authd not found in PATH: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, exe)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to launch op-authd: %w", err)
+		return fmt.Errorf("failed to launch opx-authd: %w", err)
 	}
 	// Give it a moment
 	deadline := time.Now().Add(3 * time.Second)
@@ -93,7 +93,7 @@ func (c *Client) ensureDaemon(ctx context.Context) error {
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	return errors.New("failed to connect to op-authd after autostart")
+	return errors.New("failed to connect to opx-authd after autostart")
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, req any, resp any) error {

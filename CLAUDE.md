@@ -95,6 +95,7 @@ The project follows a clean layered architecture with clear separation of concer
 - Access decision tracking with complete process information
 - Authentication and session event logging
 - Configurable audit trail for compliance and security monitoring
+- Interactive audit log analysis and policy management tools
 
 **Protocol Layer (`internal/protocol/`)**
 - JSON request/response structs for all API endpoints
@@ -201,6 +202,9 @@ make build
 
 # Test all packages
 go test ./...
+
+# Test audit functionality
+./bin/opx audit --interactive
 
 # Test GoReleaser configuration
 DRY_RUN=true ./scripts/release.sh

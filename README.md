@@ -119,6 +119,15 @@ make build
 
 # Resolve env vars then run a command locally
 ./bin/opx run --env DB_PASS=op://Engineering/DB/password -- -- bash -lc 'echo "db pass: $DB_PASS"'
+
+# Check daemon status
+./bin/opx status
+
+# View recent access denials
+./bin/opx audit --since=1h
+
+# Interactive policy management
+./bin/opx audit --interactive
 ```
 
 The client will attempt to autostart the daemon if it can't connect. You can disable this via `OPX_AUTOSTART=0`.
@@ -219,6 +228,61 @@ Enable comprehensive security audit logging with `--enable-audit-log`:
 ```json
 {"timestamp":"2025-09-05T15:30:45Z","event":"ACCESS_DECISION","peer_info":{"PID":12345,"Path":"/usr/bin/kubectl"},"reference":"op://Production/k8s/token","decision":"ALLOW","policy_path":"~/.config/op-authd/policy.json"}
 {"timestamp":"2025-09-05T15:31:02Z","event":"ACCESS_DECISION","peer_info":{"PID":12346,"Path":"/tmp/malicious"},"reference":"op://Production/admin/key","decision":"DENY","policy_path":"~/.config/op-authd/policy.json"}
+```
+
+## Audit Log Management
+
+The `opx audit` command helps you analyze access denials and create policy rules:
+
+### View Recent Denials
+
+```bash
+# Show denials from last 24 hours (default)
+./opx audit
+
+# Show denials from last hour
+./opx audit --since=1h
+
+# Show denials from last week
+./opx audit --since=168h
+```
+
+### Interactive Policy Management
+
+```bash
+# Interactive mode for creating allow rules
+./opx audit --interactive
+```
+
+**Example workflow:**
+1. **View denials**: See which processes were denied access to which secrets
+2. **Select denials**: Choose which ones should be allowed (comma-separated: `1,3,5`)
+3. **Choose scope**: Select permission level (exact reference, vault-wide, or all secrets)
+4. **Auto-update**: Policy file automatically updated with new rules
+
+**Interactive Session Example:**
+```
+Scanning audit log for denials in the last 24h...
+Found 2 unique access denials:
+
+[1] Process: /usr/bin/kubectl
+    Reference: op://Production/k8s/token
+    Denied: 5 times, Last: 2025-09-05 15:31:02
+
+[2] Process: /usr/local/bin/deploy
+    Reference: op://Staging/api/key
+    Denied: 2 times, Last: 2025-09-05 15:28:15
+
+Select denials to create allow rules for: 1,2
+
+Creating allow rule for: /usr/bin/kubectl -> op://Production/k8s/token
+Select permission level:
+  [1] op://Production/k8s/token (exact match)
+  [2] op://Production/* (entire vault)
+  [3] * (all secrets)
+Choice: 2
+
+✅ Added rule: /usr/bin/kubectl can access op://Production/*
 ```
 
 ## Systemd (user) example
