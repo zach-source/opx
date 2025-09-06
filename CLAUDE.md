@@ -141,6 +141,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 #### Application Configuration
 - `OP_AUTHD_BACKEND`: Set to `fake` for testing (default: `opcli`)
 - `OPX_AUTOSTART`: Set to `0` to disable client auto-starting daemon
+- `OPX_AUTHD_PATH`: Custom path to opx-authd binary (default: search PATH)
 - `OP_AUTHD_SESSION_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
 - `OP_AUTHD_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
 

@@ -74,10 +74,14 @@ func (c *Client) ensureDaemon(ctx context.Context) error {
 	if os.Getenv("OPX_AUTOSTART") == "0" {
 		return errors.New("daemon not reachable and autostart disabled (OPX_AUTOSTART=0)")
 	}
-	// Attempt to start: call opx-authd binary from PATH
-	exe, err := exec.LookPath("opx-authd")
-	if err != nil {
-		return fmt.Errorf("opx-authd not found in PATH: %w", err)
+	// Attempt to start: call opx-authd binary from configured path or PATH
+	exe := getDaemonPath()
+	if exe == "" {
+		var err error
+		exe, err = exec.LookPath("opx-authd")
+		if err != nil {
+			return fmt.Errorf("opx-authd not found in PATH: %w", err)
+		}
 	}
 	cmd := exec.CommandContext(ctx, exe)
 	cmd.Stdout = os.Stdout
@@ -146,6 +150,23 @@ func (c *Client) Ping(ctx context.Context) error {
 		return fmt.Errorf("status %s", r.Status)
 	}
 	return nil
+}
+
+// getDaemonPath returns the configured path to the opx-authd binary
+func getDaemonPath() string {
+	// Check environment variable first
+	if path := os.Getenv("OPX_AUTHD_PATH"); path != "" {
+		return path
+	}
+
+	// TODO: Could also check config file here if we add client-side config
+	// configDir, err := util.ConfigDir()
+	// if err == nil {
+	//     configPath := filepath.Join(configDir, "client.json")
+	//     // Load client config and check daemon_path field
+	// }
+
+	return "" // Use PATH lookup
 }
 
 func (c *Client) Read(ctx context.Context, ref string) (protocol.ReadResponse, error) {

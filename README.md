@@ -101,6 +101,7 @@ make build
 ### Application Configuration
 - `OP_AUTHD_BACKEND=fake` - Set backend for testing (default: `opcli`)
 - `OPX_AUTOSTART=0` - Disable client auto-starting daemon
+- `OPX_AUTHD_PATH=/path/to/opx-authd` - Custom path to daemon binary
 - `OP_AUTHD_SESSION_TIMEOUT=8h` - Session timeout (duration format)
 - `OP_AUTHD_ENABLE_SESSION_LOCK=true` - Enable session management
 
