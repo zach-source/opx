@@ -48,7 +48,7 @@ func TestRoller_GetCurrentLogPath(t *testing.T) {
 
 	path := roller.GetCurrentLogPath()
 	expectedDate := time.Now().Format("2006-01-02")
-	expectedSuffix := filepath.Join("op-authd", "audit-"+expectedDate+".log")
+	expectedSuffix := filepath.Join("opx-authd", "audit-"+expectedDate+".log")
 
 	if !strings.HasSuffix(path, expectedSuffix) {
 		t.Errorf("Expected path to end with %q, got %q", expectedSuffix, path)
@@ -125,7 +125,7 @@ func TestRoller_ListLogFiles(t *testing.T) {
 	defer roller.Close()
 
 	// Create some test log files
-	dataDir := filepath.Join(tempDir, "op-authd")
+	dataDir := filepath.Join(tempDir, "opx-authd")
 	os.MkdirAll(dataDir, 0700)
 
 	testDates := []string{"2025-01-01", "2025-01-02", "2025-01-03"}

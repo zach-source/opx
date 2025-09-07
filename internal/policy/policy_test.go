@@ -212,7 +212,7 @@ func TestLoadPolicy(t *testing.T) {
 		t.Error("Expected default policy to not be default deny")
 	}
 
-	expectedPath := filepath.Join(tempDir, "op-authd", "policy.json")
+	expectedPath := filepath.Join(tempDir, "opx-authd", "policy.json")
 	if path != expectedPath {
 		t.Errorf("Expected policy path %q, got %q", expectedPath, path)
 	}
@@ -220,7 +220,7 @@ func TestLoadPolicy(t *testing.T) {
 
 func TestLoadPolicy_WithFile(t *testing.T) {
 	tempDir := t.TempDir()
-	configDir := filepath.Join(tempDir, "op-authd")
+	configDir := filepath.Join(tempDir, "opx-authd")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestLoadPolicy_WithFile(t *testing.T) {
 
 func TestLoadPolicy_InvalidJSON(t *testing.T) {
 	tempDir := t.TempDir()
-	configDir := filepath.Join(tempDir, "op-authd")
+	configDir := filepath.Join(tempDir, "opx-authd")
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}

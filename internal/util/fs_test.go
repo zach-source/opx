@@ -444,7 +444,7 @@ func TestDataDir(t *testing.T) {
 		t.Fatalf("DataDir failed: %v", err)
 	}
 
-	expectedSuffix := filepath.Join(".local", "share", "op-authd")
+	expectedSuffix := filepath.Join(".local", "share", "opx-authd")
 	if !strings.HasSuffix(dir, expectedSuffix) {
 		t.Errorf("Expected DataDir to end with %q, got %q", expectedSuffix, dir)
 	}
@@ -460,7 +460,7 @@ func TestDataDirWithXDG(t *testing.T) {
 		t.Fatalf("DataDir failed: %v", err)
 	}
 
-	expected := filepath.Join(testDataHome, "op-authd")
+	expected := filepath.Join(testDataHome, "opx-authd")
 	if dir != expected {
 		t.Errorf("Expected DataDir %q, got %q", expected, dir)
 	}
@@ -475,7 +475,7 @@ func TestConfigDir(t *testing.T) {
 		t.Fatalf("ConfigDir failed: %v", err)
 	}
 
-	expectedSuffix := filepath.Join(".config", "op-authd")
+	expectedSuffix := filepath.Join(".config", "opx-authd")
 	if !strings.HasSuffix(dir, expectedSuffix) {
 		t.Errorf("Expected ConfigDir to end with %q, got %q", expectedSuffix, dir)
 	}
@@ -491,7 +491,7 @@ func TestConfigDirWithXDG(t *testing.T) {
 		t.Fatalf("ConfigDir failed: %v", err)
 	}
 
-	expected := filepath.Join(testConfigHome, "op-authd")
+	expected := filepath.Join(testConfigHome, "opx-authd")
 	if dir != expected {
 		t.Errorf("Expected ConfigDir %q, got %q", expected, dir)
 	}
@@ -533,7 +533,7 @@ func TestRuntimeDirWithXDG(t *testing.T) {
 		t.Fatalf("RuntimeDir failed: %v", err)
 	}
 
-	expected := filepath.Join(testRuntimeDir, "op-authd")
+	expected := filepath.Join(testRuntimeDir, "opx-authd")
 	if dir != expected {
 		t.Errorf("Expected RuntimeDir %q, got %q", expected, dir)
 	}
@@ -573,7 +573,7 @@ func TestStateDir_XDGWhenNoOldDir(t *testing.T) {
 		t.Fatalf("StateDir failed: %v", err)
 	}
 
-	expected := filepath.Join(testDataHome, "op-authd")
+	expected := filepath.Join(testDataHome, "opx-authd")
 	if dir != expected {
 		t.Errorf("Expected StateDir to use XDG path %q when no old dir exists, got %q", expected, dir)
 	}

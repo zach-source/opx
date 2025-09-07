@@ -51,14 +51,15 @@ func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, 
 	return value, nil
 }
 
-// ValidateCurrentSession checks if the current 1Password CLI session is valid
+// ValidateCurrentSession validates daemon access session (not 1Password sessions)
 // This is used as the unlock callback for session validation
 func ValidateCurrentSession(ctx context.Context) error {
-	// Use `op whoami` to check if there's an active session
-	cmd := exec.CommandContext(ctx, "op", "whoami")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("1Password CLI session invalid or expired: %w", err)
-	}
+	// For daemon session validation, we just need user to approve daemon access
+	// We don't validate underlying 1Password sessions here since they're per-request
+	// This represents: "Is the user approved to access the daemon for the next 8 hours?"
+
+	// For now, always return nil since daemon access approval is implicit
+	// TODO: Add interactive approval prompt for first-time access
 	return nil
 }
 

@@ -398,6 +398,9 @@ func handleLoginCommand(opFlags []string) {
 	fmt.Println("✅ Successfully logged into 1Password")
 	fmt.Println("You can now use opx to read secrets:")
 	fmt.Println("  opx read 'op://vault/item/field'")
+	fmt.Println("")
+	fmt.Println("If you have multiple accounts, set OP_ACCOUNT environment variable:")
+	fmt.Println("  export OP_ACCOUNT=your-account-id")
 }
 
 func handleVaultLoginCommand(args []string) {

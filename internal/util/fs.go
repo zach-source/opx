@@ -23,10 +23,10 @@ func DataDir() (string, error) {
 
 	// Check XDG_DATA_HOME first
 	if xdgDataHome := os.Getenv("XDG_DATA_HOME"); xdgDataHome != "" {
-		dir = filepath.Join(xdgDataHome, "op-authd")
+		dir = filepath.Join(xdgDataHome, "opx-authd")
 	} else {
-		// Fallback to ~/.local/share/op-authd
-		dir = filepath.Join(HomeDir(), ".local", "share", "op-authd")
+		// Fallback to ~/.local/share/opx-authd
+		dir = filepath.Join(HomeDir(), ".local", "share", "opx-authd")
 	}
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -44,10 +44,10 @@ func ConfigDir() (string, error) {
 
 	// Check XDG_CONFIG_HOME first
 	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		dir = filepath.Join(xdgConfigHome, "op-authd")
+		dir = filepath.Join(xdgConfigHome, "opx-authd")
 	} else {
-		// Fallback to ~/.config/op-authd
-		dir = filepath.Join(HomeDir(), ".config", "op-authd")
+		// Fallback to ~/.config/opx-authd
+		dir = filepath.Join(HomeDir(), ".config", "opx-authd")
 	}
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -75,7 +75,7 @@ func RuntimeDir() (string, error) {
 
 	// Check XDG_RUNTIME_DIR first
 	if xdgRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntimeDir != "" {
-		dir = filepath.Join(xdgRuntimeDir, "op-authd")
+		dir = filepath.Join(xdgRuntimeDir, "opx-authd")
 	} else {
 		// Fallback to data directory for runtime files
 		return DataDir()
