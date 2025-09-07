@@ -24,6 +24,7 @@ Usage:
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
   opx audit [--since=24h] [--interactive]
+  opx verify-audit [--file=path] [--since=7d] [--all]
   opx login [--account=ACCOUNT]
   opx vault-login [--address=URL] [--method=userpass]
 
@@ -33,6 +34,7 @@ Commands:
   run                  # Run command with resolved env vars
   status               # Check daemon status
   audit                # Manage access control policies
+  verify-audit         # Verify audit log integrity
   login                # Login to 1Password account
   vault-login          # Login to HashiCorp Vault or OpenBao
 
@@ -105,6 +107,9 @@ func main() {
 		return
 	case "vault-login":
 		handleVaultLoginCommand(cmdArgs)
+		return
+	case "verify-audit":
+		handleVerifyAuditCommand(cmdArgs)
 		return
 	}
 
@@ -437,4 +442,51 @@ func handleVaultLoginCommand(args []string) {
 	fmt.Println("After authentication, you can read Vault secrets:")
 	fmt.Println("  opx read 'vault://secret/myapp/config#password'")
 	fmt.Println("  opx read 'bao://kv/production/api#key'")
+}
+
+func handleVerifyAuditCommand(args []string) {
+	var logFile string
+	var since string
+	var verifyAll bool
+
+	// Parse verify-audit specific flags
+	verifyFlags := flag.NewFlagSet("verify-audit", flag.ExitOnError)
+	verifyFlags.StringVar(&logFile, "file", "", "specific log file to verify")
+	verifyFlags.StringVar(&since, "since", "7d", "verify logs from last duration")
+	verifyFlags.BoolVar(&verifyAll, "all", false, "verify all available audit logs")
+	verifyFlags.Parse(args)
+
+	fmt.Println("Verifying audit log integrity...")
+
+	// Create integrity manager for verification
+	integrityManager, err := audit.NewIntegrityManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create integrity manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	if logFile != "" {
+		// Verify specific file
+		valid, errors, err := integrityManager.VerifyLogFile(logFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to verify log file %s: %v\n", logFile, err)
+			os.Exit(1)
+		}
+
+		if valid {
+			fmt.Printf("✅ Log file %s: INTEGRITY VERIFIED\n", logFile)
+		} else {
+			fmt.Printf("❌ Log file %s: INTEGRITY COMPROMISED\n", logFile)
+			for _, errMsg := range errors {
+				fmt.Printf("  - %s\n", errMsg)
+			}
+			os.Exit(1)
+		}
+		return
+	}
+
+	// TODO: Implement --since and --all verification
+	fmt.Println("⚠️  Multi-file verification not yet implemented")
+	fmt.Println("Use --file=path to verify specific log files")
+	fmt.Println("Example: opx verify-audit --file=~/.local/share/op-authd/audit-2025-01-15.log")
 }

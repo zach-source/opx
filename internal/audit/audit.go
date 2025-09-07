@@ -21,10 +21,11 @@ type AuditEvent struct {
 	Details    map[string]string `json:"details,omitempty"`
 }
 
-// Logger handles audit event logging with rotation
+// Logger handles audit event logging with rotation and integrity protection
 type Logger struct {
-	enabled bool
-	roller  *Roller
+	enabled          bool
+	roller           *Roller
+	integrityManager *IntegrityManager
 }
 
 // NewLogger creates a new audit logger with configurable rotation
@@ -43,9 +44,15 @@ func NewLoggerWithConfig(enabled bool, config RollerConfig) (*Logger, error) {
 		return nil, fmt.Errorf("failed to create log roller: %w", err)
 	}
 
+	integrityManager, err := NewIntegrityManager()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create integrity manager: %w", err)
+	}
+
 	return &Logger{
-		enabled: true,
-		roller:  roller,
+		enabled:          true,
+		roller:           roller,
+		integrityManager: integrityManager,
 	}, nil
 }
 
@@ -57,8 +64,16 @@ func (l *Logger) LogEvent(event AuditEvent) {
 
 	event.Timestamp = time.Now()
 
-	// Log to structured audit file with rotation
-	if l.roller != nil {
+	// Log to structured audit file with rotation and integrity protection
+	if l.roller != nil && l.integrityManager != nil {
+		// Sign the event for integrity protection
+		secureEvent := l.integrityManager.SignEvent(event)
+		data, err := json.Marshal(secureEvent)
+		if err == nil {
+			l.roller.Write(append(data, '\n'))
+		}
+	} else if l.roller != nil {
+		// Fallback to unsigned events if integrity manager unavailable
 		data, err := json.Marshal(event)
 		if err == nil {
 			l.roller.Write(append(data, '\n'))

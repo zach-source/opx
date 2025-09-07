@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
@@ -139,6 +141,9 @@ func main() {
 		log.Printf("Audit logging enabled")
 	}
 
+	// Create rate limiter: 10 requests per second with burst of 5
+	rateLimiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 5)
+
 	srv := &server.Server{
 		SockPath:    sock,
 		Backend:     be,
@@ -147,6 +152,7 @@ func main() {
 		Policy:      accessPolicy,
 		PolicyPath:  policyPath,
 		AuditLogger: auditLogger,
+		RateLimiter: rateLimiter,
 		Verbose:     verbose,
 	}
 

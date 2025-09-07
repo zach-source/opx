@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/time/rate"
 
 	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
@@ -42,6 +43,7 @@ type Server struct {
 	Policy      policy.Policy
 	PolicyPath  string
 	AuditLogger *audit.Logger
+	RateLimiter *rate.Limiter
 	Verbose     bool
 
 	sf singleflight.Group
@@ -79,20 +81,19 @@ func (s *Server) Serve(ctx context.Context) error {
 	// Wrap listener with TLS
 	tlsListener := tls.NewListener(l, tlsConfig)
 
-	// Token
-	tokPath, _ := util.TokenPath()
-	tok, err := util.EnsureToken(tokPath)
+	// Secure token management
+	tok, err := util.EnsureSecureToken()
 	if err != nil {
 		return err
 	}
 	s.Token = tok
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/status", s.auth(s.handleStatus))
-	mux.HandleFunc("/v1/read", s.authWithPolicy(s.handleRead))
-	mux.HandleFunc("/v1/reads", s.authWithPolicy(s.handleReads))
-	mux.HandleFunc("/v1/resolve", s.authWithPolicy(s.handleResolve))
-	mux.HandleFunc("/v1/session/unlock", s.auth(s.handleSessionUnlock))
+	mux.HandleFunc("/v1/status", s.rateLimit(s.auth(s.handleStatus)))
+	mux.HandleFunc("/v1/read", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleRead))))
+	mux.HandleFunc("/v1/reads", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleReads))))
+	mux.HandleFunc("/v1/resolve", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleResolve))))
+	mux.HandleFunc("/v1/session/unlock", s.rateLimit(s.auth(s.limitRequestSize(s.handleSessionUnlock))))
 
 	srv := &http.Server{
 		Handler:     mux,
@@ -248,6 +249,30 @@ func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
 	}
 
 	return allowed
+}
+
+// limitRequestSize middleware limits HTTP request body size to prevent DoS attacks
+func (s *Server) limitRequestSize(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Limit request body to 1MB
+		const maxRequestSize = 1 << 20 // 1MB
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
+		next(w, r)
+	}
+}
+
+// rateLimit middleware applies rate limiting to prevent brute force attacks
+func (s *Server) rateLimit(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.RateLimiter != nil && !s.RateLimiter.Allow() {
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			if s.Verbose {
+				log.Printf("[security] rate limit exceeded from peer")
+			}
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

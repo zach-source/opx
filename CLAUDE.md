@@ -272,3 +272,4 @@ export GPG_FINGERPRINT='your-gpg-fingerprint'
 - **Checksums**: SHA256 verification for all binaries
 - **Signatures**: GPG-signed checksums (when configured)
 - **Apple notarization**: macOS binaries signed and notarized (when configured)
+- ZeroizeString with the unsafe calls is a security feature, not actually unsafe.
