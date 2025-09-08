@@ -87,7 +87,20 @@ func main() {
 	}
 
 	cmd := os.Args[cmdPos]
-	cmdArgs := os.Args[cmdPos+1:]
+
+	// Extract command arguments (non-flag arguments after the command)
+	var cmdArgs []string
+	for i := cmdPos + 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		// Skip --account flags as they've already been processed
+		if strings.HasPrefix(arg, "--account") {
+			if arg == "--account" && i+1 < len(os.Args) {
+				i++ // Skip the next argument too
+			}
+			continue
+		}
+		cmdArgs = append(cmdArgs, arg)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
