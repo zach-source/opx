@@ -6,11 +6,20 @@ import (
 	"runtime"
 )
 
+// ProcessInfo represents a single process in the hierarchy
+type ProcessInfo struct {
+	PID            int    `json:"pid"`
+	ExecutablePath string `json:"executable_path"`
+	ProcessName    string `json:"process_name,omitempty"`
+}
+
 // PeerInfo represents peer process information with platform-specific fields
 type PeerInfo struct {
 	// Common fields (all platforms)
-	PID            int
-	ExecutablePath string
+	PID              int
+	ExecutablePath   string
+	ParentPID        int           `json:"parent_pid"`
+	ProcessHierarchy []ProcessInfo `json:"process_hierarchy,omitempty"` // Parent chain
 
 	// Unix credentials (Linux)
 	UID int
@@ -43,20 +52,41 @@ type PeerInfo struct {
 
 // String returns a human-readable representation of PeerInfo
 func (pi PeerInfo) String() string {
+	var base string
 	if pi.ExecutablePath != "" {
 		switch runtime.GOOS {
 		case "linux":
-			return fmt.Sprintf("PID:%d Path:%s UID:%d GID:%d", pi.PID, pi.ExecutablePath, pi.UID, pi.GID)
+			base = fmt.Sprintf("PID:%d Path:%s UID:%d GID:%d", pi.PID, pi.ExecutablePath, pi.UID, pi.GID)
 		case "darwin":
 			if pi.Signed {
-				return fmt.Sprintf("PID:%d Path:%s Signed:%s Team:%s", pi.PID, pi.ExecutablePath, pi.SigningID, pi.TeamID)
+				base = fmt.Sprintf("PID:%d Path:%s Signed:%s Team:%s", pi.PID, pi.ExecutablePath, pi.SigningID, pi.TeamID)
+			} else {
+				base = fmt.Sprintf("PID:%d Path:%s Unsigned", pi.PID, pi.ExecutablePath)
 			}
-			return fmt.Sprintf("PID:%d Path:%s Unsigned", pi.PID, pi.ExecutablePath)
 		default:
-			return fmt.Sprintf("PID:%d Path:%s", pi.PID, pi.ExecutablePath)
+			base = fmt.Sprintf("PID:%d Path:%s", pi.PID, pi.ExecutablePath)
 		}
+	} else {
+		base = fmt.Sprintf("PID:%d", pi.PID)
 	}
-	return fmt.Sprintf("PID:%d", pi.PID)
+
+	// Add parent hierarchy info
+	if pi.ParentPID > 0 {
+		base += fmt.Sprintf(" Parent:%d", pi.ParentPID)
+	}
+
+	if len(pi.ProcessHierarchy) > 0 {
+		base += " Chain:["
+		for i, proc := range pi.ProcessHierarchy {
+			if i > 0 {
+				base += " → "
+			}
+			base += fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+		}
+		base += "]"
+	}
+
+	return base
 }
 
 // PeerFromUnixConn extracts peer credentials from a *net.UnixConn using platform-specific implementation

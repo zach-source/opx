@@ -56,6 +56,19 @@ func InspectPeerProcess(conn net.Conn) (*PeerInfo, error) {
 	exePath, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", info.PID))
 	info.ExecutablePath = exePath
 
+	// /proc/<pid>/stat -> parent PID (third field)
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", info.PID)); err == nil {
+		fields := strings.Fields(string(b))
+		if len(fields) >= 4 {
+			if ppid, err := strconv.Atoi(fields[3]); err == nil {
+				info.ParentPID = ppid
+			}
+		}
+	}
+
+	// Build process hierarchy
+	info.ProcessHierarchy = buildProcessHierarchyLinux(info.PID)
+
 	// /proc/<pid>/cmdline (NUL-separated)
 	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", info.PID)); err == nil {
 		parts := bytes.Split(bytes.TrimRight(b, "\x00"), []byte{0})
@@ -132,6 +145,56 @@ func trimHex(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…(" + strconv.Itoa(len(s)) + " hex chars)"
+}
+
+// buildProcessHierarchyLinux builds the parent process hierarchy up to init (PID 1)
+func buildProcessHierarchyLinux(startPID int) []ProcessInfo {
+	var hierarchy []ProcessInfo
+	currentPID := startPID
+	visited := make(map[int]bool) // Prevent infinite loops
+
+	// Walk up the parent chain
+	for depth := 0; depth < 10 && currentPID > 1; depth++ { // Limit depth to prevent issues
+		if visited[currentPID] {
+			break // Circular reference protection
+		}
+		visited[currentPID] = true
+
+		// Get parent PID from /proc/<pid>/stat
+		statPath := fmt.Sprintf("/proc/%d/stat", currentPID)
+		b, err := os.ReadFile(statPath)
+		if err != nil {
+			break // Process might have exited
+		}
+
+		fields := strings.Fields(string(b))
+		if len(fields) < 4 {
+			break
+		}
+
+		parentPID, err := strconv.Atoi(fields[3])
+		if err != nil || parentPID <= 1 {
+			break
+		}
+
+		// Get parent process info
+		parentExePath, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", parentPID))
+		processName := filepath.Base(parentExePath)
+		if processName == "" {
+			processName = fields[1] // comm field from stat
+			processName = strings.Trim(processName, "()")
+		}
+
+		hierarchy = append(hierarchy, ProcessInfo{
+			PID:            parentPID,
+			ExecutablePath: parentExePath,
+			ProcessName:    processName,
+		})
+
+		currentPID = parentPID
+	}
+
+	return hierarchy
 }
 
 // String method removed - using unified String() method in peer.go

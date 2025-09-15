@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -52,17 +56,23 @@ func InspectPeerProcess(conn net.Conn) (*PeerInfo, error) {
 		return nil, fmt.Errorf("codesign query failed for pid %d: %w", pid, err)
 	}
 
+	// Get parent PID and build hierarchy
+	parentPID := getParentPIDMacOS(pid)
+	hierarchy := buildProcessHierarchyMacOS(pid)
+
 	// Fill out the object
 	return &PeerInfo{
-		PID:             pid,
-		ExecutablePath:  info.ExecutablePath,
-		SigningID:       info.SigningID,
-		TeamID:          info.TeamID,
-		CDHashHex:       info.CDHashHex,
-		Flags:           info.Flags,
-		Signed:          info.Signed,
-		ValidSignature:  info.ValidSignature,
-		HasEntitlements: info.HasEntitlements,
+		PID:              pid,
+		ExecutablePath:   info.ExecutablePath,
+		ParentPID:        parentPID,
+		ProcessHierarchy: hierarchy,
+		SigningID:        info.SigningID,
+		TeamID:           info.TeamID,
+		CDHashHex:        info.CDHashHex,
+		Flags:            info.Flags,
+		Signed:           info.Signed,
+		ValidSignature:   info.ValidSignature,
+		HasEntitlements:  info.HasEntitlements,
 	}, nil
 }
 
@@ -70,6 +80,83 @@ func InspectPeerProcess(conn net.Conn) (*PeerInfo, error) {
 func ProcExists(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil
+}
+
+// getParentPIDMacOS gets the parent PID for a process on macOS
+func getParentPIDMacOS(pid int) int {
+	cmd := exec.Command("/bin/ps", "-o", "ppid=", "-p", strconv.Itoa(pid))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	ppidStr := strings.TrimSpace(string(output))
+	ppid, err := strconv.Atoi(ppidStr)
+	if err != nil {
+		return 0
+	}
+
+	return ppid
+}
+
+// buildProcessHierarchyMacOS builds the parent process hierarchy on macOS
+func buildProcessHierarchyMacOS(startPID int) []ProcessInfo {
+	var hierarchy []ProcessInfo
+	currentPID := startPID
+	visited := make(map[int]bool)
+
+	// Walk up the parent chain
+	for depth := 0; depth < 10 && currentPID > 1; depth++ { // Limit depth
+		if visited[currentPID] {
+			break // Circular reference protection
+		}
+		visited[currentPID] = true
+
+		// Get parent PID using ps command
+		parentPID := getParentPIDMacOS(currentPID)
+		if parentPID <= 1 {
+			break
+		}
+
+		// Get parent process name and path
+		var parentPath, processName string
+
+		// Try to get executable path
+		if pathCmd := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(parentPID)); pathCmd != nil {
+			if output, err := pathCmd.Output(); err == nil {
+				parentPath = strings.TrimSpace(string(output))
+				processName = filepath.Base(parentPath)
+			}
+		}
+
+		// If we couldn't get full path, get process name
+		if processName == "" {
+			if nameCmd := exec.Command("/bin/ps", "-o", "command=", "-p", strconv.Itoa(parentPID)); nameCmd != nil {
+				if output, err := nameCmd.Output(); err == nil {
+					cmdline := strings.TrimSpace(string(output))
+					if cmdline != "" {
+						parts := strings.Fields(cmdline)
+						if len(parts) > 0 {
+							processName = filepath.Base(parts[0])
+							if parentPath == "" {
+								parentPath = parts[0]
+							}
+						}
+					}
+				}
+			}
+		}
+
+		hierarchy = append(hierarchy, ProcessInfo{
+			PID:            parentPID,
+			ExecutablePath: parentPath,
+			ProcessName:    processName,
+		})
+
+		currentPID = parentPID
+	}
+
+	return hierarchy
 }
 
 // String method removed - using unified String() method in peer.go
