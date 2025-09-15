@@ -34,6 +34,65 @@ type contextKey string
 
 const peerInfoKey = contextKey("peerInfo")
 
+// PeerAwareTLSListener wraps a Unix listener to extract peer info before TLS
+type PeerAwareTLSListener struct {
+	listener  net.Listener
+	tlsConfig *tls.Config
+	server    *Server
+}
+
+// Accept accepts a connection and extracts peer info before TLS wrapping
+func (l *PeerAwareTLSListener) Accept() (net.Conn, error) {
+	// Accept raw Unix socket connection
+	rawConn, err := l.listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract peer info from Unix socket before TLS wrapping
+	var peerInfo *security.PeerInfo
+	if unixConn, ok := rawConn.(*net.UnixConn); ok {
+		if info, err := security.PeerFromUnixConn(unixConn); err == nil {
+			peerInfo = info
+			if l.server.Verbose {
+				log.Printf("[security] peer connection: %s", info.String())
+			}
+		} else if l.server.Verbose {
+			log.Printf("[security] failed to get peer info: %v", err)
+		}
+	}
+
+	// Apply TLS to the connection
+	tlsConn := tls.Server(rawConn, l.tlsConfig)
+
+	// Create wrapper that carries peer info
+	return &PeerAwareConn{
+		Conn:     tlsConn,
+		peerInfo: peerInfo,
+	}, nil
+}
+
+// Close closes the underlying listener
+func (l *PeerAwareTLSListener) Close() error {
+	return l.listener.Close()
+}
+
+// Addr returns the listener's network address
+func (l *PeerAwareTLSListener) Addr() net.Addr {
+	return l.listener.Addr()
+}
+
+// PeerAwareConn wraps a connection with extracted peer information
+type PeerAwareConn struct {
+	net.Conn
+	peerInfo *security.PeerInfo
+}
+
+// GetPeerInfo returns the extracted peer information
+func (c *PeerAwareConn) GetPeerInfo() *security.PeerInfo {
+	return c.peerInfo
+}
+
 type Server struct {
 	SockPath    string
 	Token       string
@@ -78,8 +137,12 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 
-	// Wrap listener with TLS
-	tlsListener := tls.NewListener(l, tlsConfig)
+	// Create peer-aware TLS listener
+	peerListener := &PeerAwareTLSListener{
+		listener:  l,
+		tlsConfig: tlsConfig,
+		server:    s,
+	}
 
 	// Secure token management
 	tok, err := util.EnsureSecureToken()
@@ -114,7 +177,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
-		_ = tlsListener.Close()
+		_ = peerListener.Close()
 		_ = l.Close()
 		_ = os.Remove(s.SockPath)
 	}()
@@ -123,7 +186,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		log.Printf("op-authd listening on unix+tls://%s backend=%s ttl=%s", s.SockPath, s.Backend.Name(), s.CacheTTL())
 	}
 
-	return srv.Serve(tlsListener)
+	return srv.Serve(peerListener)
 }
 
 // setupSessionLockCallback configures the session manager to clear cache on lock
@@ -147,16 +210,14 @@ func (s *Server) setupSessionLockCallback() {
 	s.Session.SetCallbacks(lockCallback, unlockCallback)
 }
 
-// peerConnContext extracts peer information from Unix socket connections
+// peerConnContext extracts peer information from PeerAwareConn
 func (s *Server) peerConnContext(ctx context.Context, conn net.Conn) context.Context {
-	if unixConn, ok := conn.(*net.UnixConn); ok {
-		if peerInfo, err := security.PeerFromUnixConn(unixConn); err == nil {
+	if peerConn, ok := conn.(*PeerAwareConn); ok {
+		if peerInfo := peerConn.GetPeerInfo(); peerInfo != nil {
 			ctx = context.WithValue(ctx, peerInfoKey, *peerInfo)
 			if s.Verbose {
-				log.Printf("[security] peer connection: %s", peerInfo.String())
+				log.Printf("[security] using peer info: %s", peerInfo.String())
 			}
-		} else if s.Verbose {
-			log.Printf("[security] failed to get peer info: %v", err)
 		}
 	}
 	return ctx

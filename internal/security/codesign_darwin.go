@@ -123,8 +123,11 @@ static int query_codesign_for_pid(pid_t pid,
 	CFStringRef team = (CFStringRef)CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier);
 	if (team) *outTeamID = cfstring_copy_utf8(team);
 
-	CFDataRef cdhash = (CFDataRef)CFDictionaryGetValue(info, kSecCodeInfoCdHashes);
-	if (cdhash) *outCDHashHex = cfdata_hex(cdhash);
+	CFArrayRef cdHashArray = (CFArrayRef)CFDictionaryGetValue(info, kSecCodeInfoCdHashes);
+	if (cdHashArray && CFArrayGetCount(cdHashArray) > 0) {
+		CFDataRef cdhash = (CFDataRef)CFArrayGetValueAtIndex(cdHashArray, 0);
+		if (cdhash) *outCDHashHex = cfdata_hex(cdhash);
+	}
 
 	CFNumberRef flags = (CFNumberRef)CFDictionaryGetValue(info, kSecCodeInfoFlags);
 	if (flags) cfnumber_u32(flags, outFlags);
