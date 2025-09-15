@@ -944,7 +944,16 @@ func formatDetailedAccessAttempt(index int, attempt AccessAttempt) string {
 			if i > 0 {
 				result += " → "
 			}
-			result += fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+			processDesc := fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+			if proc.Verified {
+				processDesc += "✓"
+				if proc.ValidSignature {
+					processDesc += "🔒"
+				}
+			} else {
+				processDesc += "?"
+			}
+			result += processDesc
 		}
 	}
 

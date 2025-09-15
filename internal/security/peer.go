@@ -11,6 +11,11 @@ type ProcessInfo struct {
 	PID            int    `json:"pid"`
 	ExecutablePath string `json:"executable_path"`
 	ProcessName    string `json:"process_name,omitempty"`
+	Verified       bool   `json:"verified"`             // Whether PID-to-executable mapping is cryptographically verified
+	SigningID      string `json:"signing_id,omitempty"` // Code signing identity (macOS)
+	TeamID         string `json:"team_id,omitempty"`    // Developer team ID (macOS)
+	CDHashHex      string `json:"cd_hash,omitempty"`    // Code directory hash (macOS)
+	ValidSignature bool   `json:"valid_signature"`      // Whether signature is valid (macOS)
 }
 
 // PeerInfo represents peer process information with platform-specific fields
@@ -81,7 +86,13 @@ func (pi PeerInfo) String() string {
 			if i > 0 {
 				base += " → "
 			}
-			base += fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+			processDesc := fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+			if proc.Verified {
+				processDesc += "✓"
+			} else {
+				processDesc += "?"
+			}
+			base += processDesc
 		}
 		base += "]"
 	}

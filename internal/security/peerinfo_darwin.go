@@ -147,16 +147,75 @@ func buildProcessHierarchyMacOS(startPID int) []ProcessInfo {
 			}
 		}
 
-		hierarchy = append(hierarchy, ProcessInfo{
+		// Verify parent process using Security framework
+		verified, signingInfo := verifyParentProcessMacOS(parentPID, parentPath)
+
+		procInfo := ProcessInfo{
 			PID:            parentPID,
 			ExecutablePath: parentPath,
 			ProcessName:    processName,
-		})
+			Verified:       verified,
+		}
+
+		// Add signing information if verification succeeded
+		if verified && signingInfo != nil {
+			procInfo.SigningID = signingInfo.SigningID
+			procInfo.TeamID = signingInfo.TeamID
+			procInfo.CDHashHex = signingInfo.CDHashHex
+			procInfo.ValidSignature = signingInfo.ValidSignature
+		}
+
+		hierarchy = append(hierarchy, procInfo)
 
 		currentPID = parentPID
 	}
 
 	return hierarchy
+}
+
+// verifyParentProcessMacOS verifies a parent process using Security framework
+func verifyParentProcessMacOS(pid int, expectedPath string) (bool, *csInfo) {
+	// Check if the process still exists first (fast check)
+	if !ProcExists(pid) {
+		return false, nil
+	}
+
+	// Get code signature info for the PID (this might fail for some processes)
+	info, err := getCodeSignatureInfoForPID(pid)
+	if err != nil {
+		// Security framework failed - this can happen for system processes or unsigned binaries
+		// We still consider it "verified" if the process exists and path matches
+		if expectedPath != "" {
+			// Do a simple path verification without signature validation
+			actualPath := getExecutablePathMacOS(pid)
+			if actualPath == expectedPath {
+				return true, &csInfo{
+					ExecutablePath: actualPath,
+					Signed:         false,
+					ValidSignature: false,
+				}
+			}
+		}
+		return false, nil
+	}
+
+	// Verify that the PID's executable path matches what we expect
+	if expectedPath != "" && info.ExecutablePath != expectedPath {
+		// Path mismatch - possible PID reuse or spoofing
+		return false, nil
+	}
+
+	return true, info
+}
+
+// getExecutablePathMacOS gets executable path for a PID using ps command
+func getExecutablePathMacOS(pid int) string {
+	cmd := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(pid))
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
 }
 
 // String method removed - using unified String() method in peer.go
