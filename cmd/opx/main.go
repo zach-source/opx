@@ -17,6 +17,7 @@ import (
 	"github.com/zach-source/opx/internal/client"
 	"github.com/zach-source/opx/internal/policy"
 	"github.com/zach-source/opx/internal/security"
+	"github.com/zach-source/opx/internal/util"
 )
 
 func usage() {
@@ -27,8 +28,8 @@ Usage:
   opx [--account=ACCOUNT] resolve NAME=REF [NAME=REF ...]
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
-  opx audit [--since=24h] [--interactive]
-  opx verify-audit [--file=path] [--since=7d] [--all]
+  opx audit [--since=24h|2d|1w] [--interactive]
+  opx verify-audit [--file=path] [--since=7d|1w|1M] [--all]
   opx policy <subcommand> [options]
   opx login [--account=ACCOUNT]
   opx vault-login [--address=URL] [--method=userpass]
@@ -48,7 +49,7 @@ Global Flags:
   --account=ACCOUNT     # 1Password account to use
 
 Audit Flags:
-  --since=24h          # Show denials from last 24 hours (default)
+  --since=24h|2d|1w|1M # Show denials from last duration (supports h/d/w/M/y)
   --interactive        # Interactive policy management
 
 Environment:
@@ -261,12 +262,12 @@ func handleAuditCommand(args []string) {
 
 	// Parse audit-specific flags
 	auditFlags := flag.NewFlagSet("audit", flag.ExitOnError)
-	auditFlags.StringVar(&since, "since", "24h", "show denials from last duration (e.g., 1h, 24h, 7d)")
+	auditFlags.StringVar(&since, "since", "24h", "show denials from last duration (e.g., 1h, 24h, 2d, 1w, 1M)")
 	auditFlags.BoolVar(&interactive, "interactive", false, "interactive policy management")
 	auditFlags.Parse(args)
 
 	// Parse duration
-	sinceData, err := time.ParseDuration(since)
+	sinceData, err := util.ParseDuration(since)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
 		os.Exit(1)
@@ -397,11 +398,14 @@ func parseSelection(input string) []int {
 
 // AccessAttempt represents an access attempt from audit logs
 type AccessAttempt struct {
-	ProcessPath string
-	Reference   string
-	Decision    string
-	Count       int
-	LastAttempt time.Time
+	ProcessPath      string
+	Reference        string
+	Decision         string
+	Count            int
+	LastAttempt      time.Time
+	ParentPID        int
+	ProcessHierarchy []security.ProcessInfo
+	SigningInfo      string
 }
 
 // scanAllAccessAttempts scans audit logs for all access decisions (ALLOW and DENY)
@@ -458,12 +462,22 @@ func scanAllAccessAttempts(since time.Duration) ([]AccessAttempt, error) {
 					existing.LastAttempt = event.Timestamp
 				}
 			} else {
+				signingInfo := ""
+				if event.PeerInfo.Signed {
+					signingInfo = fmt.Sprintf("Signed:%s Team:%s", event.PeerInfo.SigningID, event.PeerInfo.TeamID)
+				} else {
+					signingInfo = "Unsigned"
+				}
+
 				attempts[key] = &AccessAttempt{
-					ProcessPath: event.PeerInfo.ExecutablePath,
-					Reference:   event.Reference,
-					Decision:    event.Decision,
-					Count:       1,
-					LastAttempt: event.Timestamp,
+					ProcessPath:      event.PeerInfo.ExecutablePath,
+					Reference:        event.Reference,
+					Decision:         event.Decision,
+					Count:            1,
+					LastAttempt:      event.Timestamp,
+					ParentPID:        event.PeerInfo.ParentPID,
+					ProcessHierarchy: event.PeerInfo.ProcessHierarchy,
+					SigningInfo:      signingInfo,
 				}
 			}
 		}
@@ -849,7 +863,7 @@ func handlePolicyReview(args []string) {
 	}
 
 	// Parse duration
-	sinceData, err := time.ParseDuration(since)
+	sinceData, err := util.ParseDuration(since)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
 		os.Exit(1)
@@ -881,26 +895,127 @@ func handlePolicyReview(args []string) {
 		}
 	}
 
+	// Collect output for paging
+	var output []string
+
 	if len(denies) > 0 {
-		fmt.Printf("❌ DENIED ACCESS (%d attempts):\n", len(denies))
+		output = append(output, fmt.Sprintf("❌ DENIED ACCESS (%d attempts):", len(denies)))
 		for i, attempt := range denies {
-			fmt.Printf("  [%d] %s → %s (denied %d times)\n",
-				i+1, attempt.ProcessPath, attempt.Reference, attempt.Count)
+			output = append(output, formatDetailedAccessAttempt(i+1, attempt))
 		}
-		fmt.Println()
+		output = append(output, "")
 	}
 
 	if len(allows) > 0 {
-		fmt.Printf("✅ ALLOWED ACCESS (%d attempts):\n", len(allows))
+		output = append(output, fmt.Sprintf("✅ ALLOWED ACCESS (%d attempts):", len(allows)))
 		for i, attempt := range allows {
-			fmt.Printf("  [%d] %s → %s (allowed %d times)\n",
-				i+1, attempt.ProcessPath, attempt.Reference, attempt.Count)
+			output = append(output, formatDetailedAccessAttempt(i+1, attempt))
 		}
-		fmt.Println()
+		output = append(output, "")
 	}
+
+	// Page output if long
+	pageOutput(output)
 
 	fmt.Println("Use: opx policy add --interactive to create rules from denied access")
 	fmt.Println("Use: opx audit --interactive for detailed denial management")
+}
+
+// formatDetailedAccessAttempt formats an access attempt with rich hierarchy information
+func formatDetailedAccessAttempt(index int, attempt AccessAttempt) string {
+	result := fmt.Sprintf("  [%d] %s → %s (%s %d times)",
+		index, filepath.Base(attempt.ProcessPath), attempt.Reference,
+		strings.ToLower(attempt.Decision), attempt.Count)
+
+	result += fmt.Sprintf("\n      Process: %s", attempt.ProcessPath)
+	result += fmt.Sprintf("\n      Last: %s", attempt.LastAttempt.Format("2006-01-02 15:04:05"))
+
+	if attempt.SigningInfo != "" {
+		result += fmt.Sprintf("\n      Signing: %s", attempt.SigningInfo)
+	}
+
+	if attempt.ParentPID > 0 {
+		result += fmt.Sprintf("\n      Parent PID: %d", attempt.ParentPID)
+	}
+
+	if len(attempt.ProcessHierarchy) > 0 {
+		result += "\n      Call Chain: "
+		for i, proc := range attempt.ProcessHierarchy {
+			if i > 0 {
+				result += " → "
+			}
+			result += fmt.Sprintf("%s(%d)", proc.ProcessName, proc.PID)
+		}
+	}
+
+	return result
+}
+
+// pageOutput displays output with more/less style paging for long content
+func pageOutput(lines []string) {
+	if len(lines) <= 20 { // Show directly if short
+		for _, line := range lines {
+			fmt.Println(line)
+		}
+		return
+	}
+
+	// Use more/less style paging for long output
+	fmt.Printf("Output has %d lines. Press Enter to continue, 'q' to quit, or number + Enter to jump:\n", len(lines))
+
+	reader := bufio.NewReader(os.Stdin)
+	currentLine := 0
+	pageSize := 20
+
+	for currentLine < len(lines) {
+		// Show current page
+		endLine := currentLine + pageSize
+		if endLine > len(lines) {
+			endLine = len(lines)
+		}
+
+		for i := currentLine; i < endLine; i++ {
+			fmt.Println(lines[i])
+		}
+
+		// Check if we're done
+		if endLine >= len(lines) {
+			break
+		}
+
+		// Show pager prompt
+		remaining := len(lines) - endLine
+		fmt.Printf("--More-- (%d lines remaining) [Enter=next page, q=quit, number=jump]: ", remaining)
+
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+
+		input = strings.TrimSpace(input)
+
+		if input == "q" || input == "quit" {
+			fmt.Println("(quit)")
+			break
+		}
+
+		if input == "" {
+			// Continue to next page
+			currentLine = endLine
+			continue
+		}
+
+		// Try to parse as line number
+		if lineNum, err := strconv.Atoi(input); err == nil {
+			if lineNum > 0 && lineNum <= len(lines) {
+				currentLine = lineNum - 1 // Convert to 0-based
+				continue
+			}
+		}
+
+		// Invalid input, continue normally
+		currentLine = endLine
+	}
 }
 
 func verifyAllAuditFiles(integrityManager *audit.IntegrityManager) {
@@ -957,7 +1072,7 @@ func verifyAllAuditFiles(integrityManager *audit.IntegrityManager) {
 }
 
 func verifySinceAuditFiles(integrityManager *audit.IntegrityManager, since string) {
-	sinceData, err := time.ParseDuration(since)
+	sinceData, err := util.ParseDuration(since)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
 		os.Exit(1)
