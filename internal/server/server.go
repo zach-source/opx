@@ -286,8 +286,7 @@ func (s *Server) authWithPolicy(next http.HandlerFunc) http.HandlerFunc {
 // validateAccess checks if peer is allowed to access the given reference
 func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
 	subject := policy.Subject{
-		PID:  peerInfo.PID,
-		Path: peerInfo.ExecutablePath,
+		PeerInfo: peerInfo,
 	}
 
 	allowed := policy.Allowed(s.Policy, subject, ref)
@@ -295,8 +294,8 @@ func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
 	// Audit log the access decision
 	if s.AuditLogger != nil {
 		details := map[string]string{
-			"subject_pid":  fmt.Sprintf("%d", subject.PID),
-			"subject_path": subject.Path,
+			"subject_pid":  fmt.Sprintf("%d", subject.PeerInfo.PID),
+			"subject_path": subject.PeerInfo.ExecutablePath,
 		}
 		s.AuditLogger.LogAccessDecision(peerInfo, ref, allowed, s.PolicyPath, details)
 	}

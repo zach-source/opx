@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zach-source/opx/internal/security"
 )
 
 func TestDefaultPolicy(t *testing.T) {
@@ -100,14 +102,14 @@ func TestAllowed(t *testing.T) {
 		{
 			name:     "default policy allows all",
 			policy:   Policy{Allow: []Rule{}, DefaultDeny: false},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: true,
 		},
 		{
 			name:     "default deny blocks when no rules match",
 			policy:   Policy{Allow: []Rule{}, DefaultDeny: true},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: false,
 		},
@@ -120,7 +122,7 @@ func TestAllowed(t *testing.T) {
 				}},
 				DefaultDeny: true,
 			},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: true,
 		},
@@ -133,7 +135,7 @@ func TestAllowed(t *testing.T) {
 				}},
 				DefaultDeny: true,
 			},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: false,
 		},
@@ -146,7 +148,7 @@ func TestAllowed(t *testing.T) {
 				}},
 				DefaultDeny: true,
 			},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: true,
 		},
@@ -159,7 +161,7 @@ func TestAllowed(t *testing.T) {
 				}},
 				DefaultDeny: true,
 			},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: false,
 		},
@@ -172,7 +174,7 @@ func TestAllowed(t *testing.T) {
 				}},
 				DefaultDeny: true,
 			},
-			subject:  Subject{PID: 123, Path: "/usr/bin/test"},
+			subject:  Subject{PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"}},
 			ref:      "op://vault/item/field",
 			expected: false,
 		},

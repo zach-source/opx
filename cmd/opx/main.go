@@ -13,6 +13,8 @@ import (
 
 	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/client"
+	"github.com/zach-source/opx/internal/policy"
+	"github.com/zach-source/opx/internal/security"
 )
 
 func usage() {
@@ -25,6 +27,7 @@ Usage:
   opx status
   opx audit [--since=24h] [--interactive]
   opx verify-audit [--file=path] [--since=7d] [--all]
+  opx policy <subcommand> [options]
   opx login [--account=ACCOUNT]
   opx vault-login [--address=URL] [--method=userpass]
 
@@ -35,6 +38,7 @@ Commands:
   status               # Check daemon status
   audit                # Manage access control policies
   verify-audit         # Verify audit log integrity
+  policy               # Advanced policy management (list, add, remove, test)
   login                # Login to 1Password account
   vault-login          # Login to HashiCorp Vault or OpenBao
 
@@ -123,6 +127,9 @@ func main() {
 		return
 	case "verify-audit":
 		handleVerifyAuditCommand(cmdArgs)
+		return
+	case "policy":
+		handlePolicyCommand(cmdArgs)
 		return
 	}
 
@@ -505,4 +512,255 @@ func handleVerifyAuditCommand(args []string) {
 	fmt.Println("⚠️  Multi-file verification not yet implemented")
 	fmt.Println("Use --file=path to verify specific log files")
 	fmt.Println("Example: opx verify-audit --file=~/.local/share/op-authd/audit-2025-01-15.log")
+}
+
+func handlePolicyCommand(args []string) {
+	if len(args) < 1 {
+		printPolicyUsage()
+		return
+	}
+
+	subcommand := args[0]
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "list":
+		handlePolicyList()
+	case "add":
+		handlePolicyAdd(subArgs)
+	case "remove":
+		handlePolicyRemove(subArgs)
+	case "test":
+		handlePolicyTest(subArgs)
+	case "review":
+		handlePolicyReview(subArgs)
+	default:
+		printPolicyUsage()
+	}
+}
+
+func printPolicyUsage() {
+	fmt.Fprintf(os.Stderr, `opx policy - Advanced policy management
+
+Usage:
+  opx policy list                           # List current policy rules
+  opx policy add [--interactive]            # Add new policy rule
+  opx policy remove <rule-index>            # Remove policy rule by index
+  opx policy test <process-path> <ref>      # Test if access would be allowed
+  opx policy review [--since=24h]          # Review recent access and approve/deny
+
+Examples:
+  opx policy list                          # Show all rules
+  opx policy add --interactive             # Interactive rule creation
+  opx policy remove 2                      # Remove rule #2
+  opx policy test /usr/bin/kubectl op://prod/k8s/token
+  opx policy review --since=1h             # Review last hour's access attempts
+`)
+}
+
+func handlePolicyList() {
+	pm, err := policy.NewPolicyManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create policy manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	rules, err := pm.ListRules()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list rules: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Current Policy Rules:")
+	fmt.Println()
+	for _, rule := range rules {
+		fmt.Println(rule)
+		fmt.Println()
+	}
+}
+
+func handlePolicyAdd(args []string) {
+	interactive := false
+	for _, arg := range args {
+		if arg == "--interactive" {
+			interactive = true
+		}
+	}
+
+	if interactive {
+		handleInteractivePolicyAdd()
+		return
+	}
+
+	fmt.Println("Non-interactive policy add not yet implemented")
+	fmt.Println("Use: opx policy add --interactive")
+}
+
+func handleInteractivePolicyAdd() {
+	fmt.Println("Interactive Policy Rule Creation")
+	fmt.Println("================================")
+
+	reader := bufio.NewReader(os.Stdin)
+
+	// Get process path
+	fmt.Print("Process path (or press Enter to analyze recent denials): ")
+	processPath, _ := reader.ReadString('\n')
+	processPath = strings.TrimSpace(processPath)
+
+	if processPath == "" {
+		// Analyze recent denials
+		fmt.Println("Analyzing recent access denials...")
+		denials, err := audit.ScanRecentDenials(24 * time.Hour)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to scan denials: %v\n", err)
+			os.Exit(1)
+		}
+
+		if len(denials) == 0 {
+			fmt.Println("No recent denials found. Please specify a process path manually.")
+			return
+		}
+
+		fmt.Printf("Found %d recent denials:\n\n", len(denials))
+		for i, denial := range denials {
+			fmt.Print(audit.FormatDenialForDisplay(i, denial))
+		}
+
+		fmt.Print("Select denial to create rule for (1-" + fmt.Sprintf("%d", len(denials)) + "): ")
+		selectionStr, _ := reader.ReadString('\n')
+		selection, err := strconv.Atoi(strings.TrimSpace(selectionStr))
+		if err != nil || selection < 1 || selection > len(denials) {
+			fmt.Println("Invalid selection")
+			return
+		}
+
+		denial := denials[selection-1]
+		processPath = denial.Path
+
+		// Create rule from denial
+		pm, err := policy.NewPolicyManager()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create policy manager: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Create mock peer info from denial (simplified)
+		peer := security.PeerInfo{
+			PID:            denial.PID,
+			ExecutablePath: denial.Path,
+		}
+
+		fmt.Println("\nSelect permission scope:")
+		fmt.Println("  [1] Exact reference only")
+		fmt.Println("  [2] Entire vault")
+		fmt.Println("  [3] All secrets")
+		fmt.Print("Choice (1-3): ")
+
+		scopeStr, _ := reader.ReadString('\n')
+		scope, err := strconv.Atoi(strings.TrimSpace(scopeStr))
+		if err != nil || scope < 1 || scope > 3 {
+			fmt.Println("Invalid scope selection")
+			return
+		}
+
+		scopeMap := map[int]string{1: "exact", 2: "vault", 3: "all"}
+		rule := pm.CreateRuleFromPeerInfo(peer, denial.Reference, scopeMap[scope])
+
+		if err := pm.AddRule(rule); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to add rule: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("✅ Added rule for %s\n", processPath)
+		fmt.Println("Restart daemon to apply changes:")
+		fmt.Println("  pkill opx-authd")
+		return
+	}
+
+	fmt.Printf("Process path specified: %s\n", processPath)
+	fmt.Println("Advanced rule creation not yet implemented")
+}
+
+func handlePolicyRemove(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: opx policy remove <rule-index>")
+		return
+	}
+
+	index, err := strconv.Atoi(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid rule index: %s\n", args[0])
+		os.Exit(1)
+	}
+
+	pm, err := policy.NewPolicyManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create policy manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := pm.RemoveRule(index - 1); err != nil { // Convert 1-based to 0-based
+		fmt.Fprintf(os.Stderr, "Failed to remove rule: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Removed rule %d\n", index)
+	fmt.Println("Restart daemon to apply changes:")
+	fmt.Println("  pkill opx-authd")
+}
+
+func handlePolicyTest(args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: opx policy test <process-path> <reference>")
+		fmt.Println("Example: opx policy test /usr/bin/kubectl op://prod/k8s/token")
+		return
+	}
+
+	processPath := args[0]
+	reference := args[1]
+
+	// Create mock peer info for testing
+	peer := security.PeerInfo{
+		PID:            999999, // Mock PID
+		ExecutablePath: processPath,
+	}
+
+	pm, err := policy.NewPolicyManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create policy manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	allowed, reason := pm.TestAccess(peer, reference)
+
+	if allowed {
+		fmt.Printf("✅ ALLOW: %s can access %s\n", processPath, reference)
+		fmt.Printf("Reason: %s\n", reason)
+	} else {
+		fmt.Printf("❌ DENY: %s cannot access %s\n", processPath, reference)
+		fmt.Printf("Reason: %s\n", reason)
+	}
+}
+
+func handlePolicyReview(args []string) {
+	since := "24h"
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "--since=") {
+			since = strings.TrimPrefix(arg, "--since=")
+		} else if arg == "--since" && i+1 < len(args) {
+			since = args[i+1]
+		}
+	}
+
+	_, err := time.ParseDuration(since)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Reviewing access attempts from last %s...\n", since)
+
+	// Get all access attempts (not just denials)
+	fmt.Println("⚠️  Full access review not yet implemented")
+	fmt.Println("Use: opx audit --interactive for denial-based policy creation")
 }
