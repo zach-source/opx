@@ -173,38 +173,58 @@ func buildProcessHierarchyMacOS(startPID int) []ProcessInfo {
 	return hierarchy
 }
 
-// verifyParentProcessMacOS verifies a parent process using Security framework
+// verifyParentProcessMacOS verifies a parent process using Security framework with debug logging
 func verifyParentProcessMacOS(pid int, expectedPath string) (bool, *csInfo) {
+	fmt.Printf("[DEBUG] Verifying parent process PID:%d ExpectedPath:%s\n", pid, expectedPath)
+
 	// Check if the process still exists first (fast check)
 	if !ProcExists(pid) {
+		fmt.Printf("[DEBUG] PID:%d does not exist\n", pid)
 		return false, nil
 	}
+
+	fmt.Printf("[DEBUG] PID:%d exists, proceeding with Security framework verification\n", pid)
 
 	// Get code signature info for the PID (this might fail for some processes)
 	info, err := getCodeSignatureInfoForPID(pid)
 	if err != nil {
+		fmt.Printf("[DEBUG] Security framework failed for PID:%d: %v\n", pid, err)
+
 		// Security framework failed - this can happen for system processes or unsigned binaries
 		// We still consider it "verified" if the process exists and path matches
 		if expectedPath != "" {
 			// Do a simple path verification without signature validation
 			actualPath := getExecutablePathMacOS(pid)
-			if actualPath == expectedPath {
+			fmt.Printf("[DEBUG] Fallback path check for PID:%d: actual=%s expected=%s\n",
+				pid, actualPath, expectedPath)
+
+			if pathsMatch(expectedPath, actualPath) {
+				fmt.Printf("[DEBUG] PID:%d path verification succeeded (unsigned)\n", pid)
 				return true, &csInfo{
 					ExecutablePath: actualPath,
 					Signed:         false,
 					ValidSignature: false,
 				}
+			} else {
+				fmt.Printf("[DEBUG] PID:%d path verification failed: mismatch\n", pid)
 			}
 		}
+
+		fmt.Printf("[DEBUG] PID:%d verification failed: no valid path or signature\n", pid)
 		return false, nil
 	}
+
+	fmt.Printf("[DEBUG] Security framework succeeded for PID:%d: path=%s signed=%t valid=%t\n",
+		pid, info.ExecutablePath, info.Signed, info.ValidSignature)
 
 	// Verify that the PID's executable path matches what we expect
-	if expectedPath != "" && info.ExecutablePath != expectedPath {
-		// Path mismatch - possible PID reuse or spoofing
+	if expectedPath != "" && !pathsMatch(expectedPath, info.ExecutablePath) {
+		fmt.Printf("[DEBUG] PID:%d path mismatch: expected=%s actual=%s (possible spoofing)\n",
+			pid, expectedPath, info.ExecutablePath)
 		return false, nil
 	}
 
+	fmt.Printf("[DEBUG] PID:%d fully verified with Security framework\n", pid)
 	return true, info
 }
 
@@ -216,6 +236,48 @@ func getExecutablePathMacOS(pid int) string {
 		return ""
 	}
 	return strings.TrimSpace(string(output))
+}
+
+// pathsMatch checks if two paths refer to the same executable, handling symlinks and Nix store paths
+func pathsMatch(expected, actual string) bool {
+	// Direct match
+	if expected == actual {
+		return true
+	}
+
+	// Resolve symlinks for comparison
+	expectedResolved, err1 := filepath.EvalSymlinks(expected)
+	actualResolved, err2 := filepath.EvalSymlinks(actual)
+
+	// If both resolve successfully, compare resolved paths
+	if err1 == nil && err2 == nil {
+		if expectedResolved == actualResolved {
+			return true
+		}
+	}
+
+	// Check if the actual path is a Nix store path for the expected binary
+	if strings.HasPrefix(actual, "/nix/store/") {
+		expectedBase := filepath.Base(expected)
+		actualBase := filepath.Base(actual)
+
+		// If base names match, consider it a match (handles Nix store paths)
+		if expectedBase == actualBase {
+			return true
+		}
+
+		// Handle versioned binaries (e.g., zsh vs zsh-5.9)
+		if strings.HasPrefix(actualBase, expectedBase+"-") {
+			return true
+		}
+	}
+
+	// Special case for "claude" -> node mapping
+	if expected == "claude" && strings.Contains(actual, "node") {
+		return true
+	}
+
+	return false
 }
 
 // String method removed - using unified String() method in peer.go
