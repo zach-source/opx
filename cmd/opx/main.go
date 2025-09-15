@@ -3,10 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -393,6 +395,91 @@ func parseSelection(input string) []int {
 	return indices
 }
 
+// AccessAttempt represents an access attempt from audit logs
+type AccessAttempt struct {
+	ProcessPath string
+	Reference   string
+	Decision    string
+	Count       int
+	LastAttempt time.Time
+}
+
+// scanAllAccessAttempts scans audit logs for all access decisions (ALLOW and DENY)
+func scanAllAccessAttempts(since time.Duration) ([]AccessAttempt, error) {
+	// Create roller to find log files
+	roller, err := audit.NewRoller(audit.DefaultRollerConfig())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create roller: %w", err)
+	}
+	defer roller.Close()
+
+	logFiles, err := roller.ListLogFiles()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list log files: %w", err)
+	}
+
+	if len(logFiles) == 0 {
+		return []AccessAttempt{}, nil
+	}
+
+	// Parse all access attempts
+	attempts := make(map[string]*AccessAttempt)
+	cutoff := time.Now().Add(-since)
+
+	for _, logFile := range logFiles {
+		file, err := os.Open(logFile)
+		if err != nil {
+			continue // Skip files we can't open
+		}
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+
+			var secureEvent audit.SecureAuditEvent
+			if err := json.Unmarshal([]byte(line), &secureEvent); err != nil {
+				continue // Skip malformed lines
+			}
+
+			event := secureEvent.Event
+			if event.Event != "ACCESS_DECISION" || event.Timestamp.Before(cutoff) {
+				continue
+			}
+
+			// Create unique key for this process+reference+decision combination
+			key := fmt.Sprintf("%s|%s|%s", event.PeerInfo.ExecutablePath, event.Reference, event.Decision)
+
+			if existing, exists := attempts[key]; exists {
+				existing.Count++
+				if event.Timestamp.After(existing.LastAttempt) {
+					existing.LastAttempt = event.Timestamp
+				}
+			} else {
+				attempts[key] = &AccessAttempt{
+					ProcessPath: event.PeerInfo.ExecutablePath,
+					Reference:   event.Reference,
+					Decision:    event.Decision,
+					Count:       1,
+					LastAttempt: event.Timestamp,
+				}
+			}
+		}
+
+		file.Close()
+	}
+
+	// Convert to slice
+	var result []AccessAttempt
+	for _, attempt := range attempts {
+		result = append(result, *attempt)
+	}
+
+	return result, nil
+}
+
 func handleLoginCommand(opFlags []string) {
 	fmt.Println("Logging into 1Password...")
 
@@ -508,10 +595,19 @@ func handleVerifyAuditCommand(args []string) {
 		return
 	}
 
-	// TODO: Implement --since and --all verification
-	fmt.Println("⚠️  Multi-file verification not yet implemented")
+	// Multi-file verification
+	if verifyAll {
+		verifyAllAuditFiles(integrityManager)
+		return
+	}
+
+	if since != "7d" {
+		verifySinceAuditFiles(integrityManager, since)
+		return
+	}
+
 	fmt.Println("Use --file=path to verify specific log files")
-	fmt.Println("Example: opx verify-audit --file=~/.local/share/op-authd/audit-2025-01-15.log")
+	fmt.Println("Example: opx verify-audit --file=~/.local/share/opx-authd/audit-2025-01-15.log")
 }
 
 func handlePolicyCommand(args []string) {
@@ -752,7 +848,8 @@ func handlePolicyReview(args []string) {
 		}
 	}
 
-	_, err := time.ParseDuration(since)
+	// Parse duration
+	sinceData, err := time.ParseDuration(since)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
 		os.Exit(1)
@@ -760,7 +857,182 @@ func handlePolicyReview(args []string) {
 
 	fmt.Printf("Reviewing access attempts from last %s...\n", since)
 
-	// Get all access attempts (not just denials)
-	fmt.Println("⚠️  Full access review not yet implemented")
-	fmt.Println("Use: opx audit --interactive for denial-based policy creation")
+	// Get all access attempts (both ALLOW and DENY)
+	attempts, err := scanAllAccessAttempts(sinceData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to scan access attempts: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(attempts) == 0 {
+		fmt.Printf("No access attempts found in the last %s.\n", since)
+		return
+	}
+
+	fmt.Printf("Found %d access attempts:\n\n", len(attempts))
+
+	// Group by decision type
+	var allows, denies []AccessAttempt
+	for _, attempt := range attempts {
+		if attempt.Decision == "ALLOW" {
+			allows = append(allows, attempt)
+		} else {
+			denies = append(denies, attempt)
+		}
+	}
+
+	if len(denies) > 0 {
+		fmt.Printf("❌ DENIED ACCESS (%d attempts):\n", len(denies))
+		for i, attempt := range denies {
+			fmt.Printf("  [%d] %s → %s (denied %d times)\n",
+				i+1, attempt.ProcessPath, attempt.Reference, attempt.Count)
+		}
+		fmt.Println()
+	}
+
+	if len(allows) > 0 {
+		fmt.Printf("✅ ALLOWED ACCESS (%d attempts):\n", len(allows))
+		for i, attempt := range allows {
+			fmt.Printf("  [%d] %s → %s (allowed %d times)\n",
+				i+1, attempt.ProcessPath, attempt.Reference, attempt.Count)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println("Use: opx policy add --interactive to create rules from denied access")
+	fmt.Println("Use: opx audit --interactive for detailed denial management")
+}
+
+func verifyAllAuditFiles(integrityManager *audit.IntegrityManager) {
+	// Create roller to get list of log files
+	roller, err := audit.NewRoller(audit.DefaultRollerConfig())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create roller: %v\n", err)
+		os.Exit(1)
+	}
+	defer roller.Close()
+
+	logFiles, err := roller.ListLogFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list log files: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(logFiles) == 0 {
+		fmt.Println("No audit log files found.")
+		return
+	}
+
+	fmt.Printf("Verifying %d audit log files...\n\n", len(logFiles))
+
+	allValid := true
+	for _, logFile := range logFiles {
+		fmt.Printf("Checking %s...", filepath.Base(logFile))
+
+		valid, errors, err := integrityManager.VerifyLogFile(logFile)
+		if err != nil {
+			fmt.Printf(" ERROR: %v\n", err)
+			allValid = false
+			continue
+		}
+
+		if valid {
+			fmt.Println(" ✅ VERIFIED")
+		} else {
+			fmt.Println(" ❌ COMPROMISED")
+			for _, errMsg := range errors {
+				fmt.Printf("  - %s\n", errMsg)
+			}
+			allValid = false
+		}
+	}
+
+	fmt.Println()
+	if allValid {
+		fmt.Println("🎉 All audit logs verified successfully!")
+	} else {
+		fmt.Println("⚠️  Some audit logs failed verification.")
+		os.Exit(1)
+	}
+}
+
+func verifySinceAuditFiles(integrityManager *audit.IntegrityManager, since string) {
+	sinceData, err := time.ParseDuration(since)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
+		os.Exit(1)
+	}
+
+	// Create roller to get list of log files
+	roller, err := audit.NewRoller(audit.DefaultRollerConfig())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create roller: %v\n", err)
+		os.Exit(1)
+	}
+	defer roller.Close()
+
+	logFiles, err := roller.ListLogFiles()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list log files: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Filter files by date
+	cutoff := time.Now().Add(-sinceData)
+	var relevantFiles []string
+
+	for _, logFile := range logFiles {
+		// Extract date from filename (audit-2025-01-15.log)
+		base := filepath.Base(logFile)
+		if !strings.HasPrefix(base, "audit-") || !strings.HasSuffix(base, ".log") {
+			continue
+		}
+
+		dateStr := strings.TrimSuffix(strings.TrimPrefix(base, "audit-"), ".log")
+		fileDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+
+		if fileDate.After(cutoff) {
+			relevantFiles = append(relevantFiles, logFile)
+		}
+	}
+
+	if len(relevantFiles) == 0 {
+		fmt.Printf("No audit log files found from the last %s.\n", since)
+		return
+	}
+
+	fmt.Printf("Verifying %d audit log files from last %s...\n\n", len(relevantFiles), since)
+
+	allValid := true
+	for _, logFile := range relevantFiles {
+		fmt.Printf("Checking %s...", filepath.Base(logFile))
+
+		valid, errors, err := integrityManager.VerifyLogFile(logFile)
+		if err != nil {
+			fmt.Printf(" ERROR: %v\n", err)
+			allValid = false
+			continue
+		}
+
+		if valid {
+			fmt.Println(" ✅ VERIFIED")
+		} else {
+			fmt.Println(" ❌ COMPROMISED")
+			for _, errMsg := range errors {
+				fmt.Printf("  - %s\n", errMsg)
+			}
+			allValid = false
+		}
+	}
+
+	fmt.Println()
+	if allValid {
+		fmt.Printf("🎉 All audit logs from last %s verified successfully!\n", since)
+	} else {
+		fmt.Printf("⚠️  Some audit logs from last %s failed verification.\n", since)
+		os.Exit(1)
+	}
 }

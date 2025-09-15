@@ -212,7 +212,29 @@ func ruleMatches(rule Rule, peer security.PeerInfo, ref string) bool {
 		return false
 	}
 
-	// TODO: Add command line and capabilities checking
+	// Command line checks
+	if len(rule.AllowedCommands) > 0 {
+		found := false
+		for _, allowedCmd := range rule.AllowedCommands {
+			// Check if any process in hierarchy matches allowed command
+			if len(peer.Cmdline) > 0 && strings.Contains(strings.Join(peer.Cmdline, " "), allowedCmd) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// Capabilities checks (Linux)
+	if len(rule.RequiredCaps) > 0 {
+		for _, requiredCap := range rule.RequiredCaps {
+			if !strings.Contains(peer.CapEff, requiredCap) {
+				return false
+			}
+		}
+	}
 
 	// Reference pattern matching
 	return matchRef(rule.Refs, ref)

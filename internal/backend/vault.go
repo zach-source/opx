@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -143,9 +144,68 @@ func (v *Vault) authenticate(ctx context.Context) error {
 
 // authenticateUserpass performs username/password authentication
 func (v *Vault) authenticateUserpass(ctx context.Context) error {
-	// This would typically prompt for credentials or read from environment
-	// For now, return an error with instructions
-	return fmt.Errorf("userpass authentication requires environment variables VAULT_USERNAME and VAULT_PASSWORD")
+	username := os.Getenv("VAULT_USERNAME")
+	password := os.Getenv("VAULT_PASSWORD")
+
+	if username == "" || password == "" {
+		return fmt.Errorf("userpass authentication requires environment variables VAULT_USERNAME and VAULT_PASSWORD")
+	}
+
+	// Construct userpass auth request
+	authData := map[string]interface{}{
+		"username": username,
+		"password": password,
+	}
+
+	jsonData, err := json.Marshal(authData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal auth data: %w", err)
+	}
+
+	// Make authentication request
+	authPath := "/v1/auth/userpass/login/" + username
+	req, err := http.NewRequestWithContext(ctx, "POST", v.config.Address+authPath, strings.NewReader(string(jsonData)))
+	if err != nil {
+		return fmt.Errorf("failed to create auth request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if v.config.Namespace != "" {
+		req.Header.Set("X-Vault-Namespace", v.config.Namespace)
+	}
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("auth request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("authentication failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse auth response to get token
+	var authResp struct {
+		Auth struct {
+			ClientToken   string `json:"client_token"`
+			LeaseDuration int    `json:"lease_duration"`
+		} `json:"auth"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+		return fmt.Errorf("failed to decode auth response: %w", err)
+	}
+
+	if authResp.Auth.ClientToken == "" {
+		return fmt.Errorf("no client token received from Vault")
+	}
+
+	// Store token and TTL
+	v.config.Token = authResp.Auth.ClientToken
+	v.config.TokenTTL = time.Duration(authResp.Auth.LeaseDuration) * time.Second
+
+	return nil
 }
 
 // verifyToken checks if the current token is valid
