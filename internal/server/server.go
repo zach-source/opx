@@ -151,7 +151,7 @@ func (s *Server) setupSessionLockCallback() {
 func (s *Server) peerConnContext(ctx context.Context, conn net.Conn) context.Context {
 	if unixConn, ok := conn.(*net.UnixConn); ok {
 		if peerInfo, err := security.PeerFromUnixConn(unixConn); err == nil {
-			ctx = context.WithValue(ctx, peerInfoKey, peerInfo)
+			ctx = context.WithValue(ctx, peerInfoKey, *peerInfo)
 			if s.Verbose {
 				log.Printf("[security] peer connection: %s", peerInfo.String())
 			}
@@ -226,7 +226,7 @@ func (s *Server) authWithPolicy(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) validateAccess(peerInfo security.PeerInfo, ref string) bool {
 	subject := policy.Subject{
 		PID:  peerInfo.PID,
-		Path: peerInfo.Path,
+		Path: peerInfo.ExecutablePath,
 	}
 
 	allowed := policy.Allowed(s.Policy, subject, ref)

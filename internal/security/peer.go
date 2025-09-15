@@ -3,91 +3,65 @@ package security
 import (
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
-
-	"golang.org/x/sys/unix"
 )
 
+// PeerInfo represents peer process information with platform-specific fields
 type PeerInfo struct {
-	PID  int
-	UID  uint32
-	GID  uint32
-	Path string // best-effort executable path
-}
+	// Common fields (all platforms)
+	PID            int
+	ExecutablePath string
 
-// PeerFromUnixConn extracts peer credentials from a *net.UnixConn.
-func PeerFromUnixConn(conn *net.UnixConn) (PeerInfo, error) {
-	raw, err := conn.SyscallConn()
-	if err != nil {
-		return PeerInfo{}, err
-	}
-	var pi PeerInfo
-	var serr error
+	// Unix credentials (Linux)
+	UID int
+	GID int
 
-	err = raw.Control(func(fd uintptr) {
-		switch runtime.GOOS {
-		case "linux":
-			// Get peer PID using SO_PEERCRED on Linux
-			// For now, just get PID - UID/GID can be added later with more complex syscalls
-			const SO_PEERCRED = 17
-			pid, e := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, SO_PEERCRED)
-			if e != nil {
-				serr = e
-				return
-			}
-			pi = PeerInfo{PID: pid}
-		case "darwin":
-			pid, e := unix.GetsockoptInt(int(fd), unix.SOL_LOCAL, unix.LOCAL_PEERPID)
-			if e != nil {
-				serr = e
-				return
-			}
-			pi = PeerInfo{PID: pid}
-		default:
-			serr = fmt.Errorf("peer creds unsupported on %s", runtime.GOOS)
-		}
-	})
-	if err != nil {
-		return PeerInfo{}, err
-	}
-	if serr != nil {
-		return PeerInfo{}, serr
+	// Process details (Linux)
+	Cmdline []string
+	Cgroup  string
+	CapEff  string // hex string (from /proc/<pid>/status)
+
+	// IMA/EVM evidence (Linux)
+	IMA struct {
+		HasSecurityIMA bool   // xattr present
+		SecurityIMAHex string // raw xattr hex (first 128 hex chars shown if large)
+		HasSecurityEVM bool
+		SecurityEVMHex string // raw xattr hex (first 128 hex chars shown if large)
 	}
 
-	// Best-effort executable path
-	pi.Path = exePathForPID(pi.PID)
-	return pi, nil
-}
+	SHA256 string // sha256 of the executable file
 
-func exePathForPID(pid int) string {
-	if pid <= 0 {
-		return ""
-	}
-	switch runtime.GOOS {
-	case "linux":
-		p := fmt.Sprintf("/proc/%d/exe", pid)
-		if target, err := os.Readlink(p); err == nil {
-			return target
-		}
-	case "darwin":
-		out, err := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
-		if err == nil {
-			s := string(out)
-			return filepath.Clean(strings.TrimSpace(s))
-		}
-	}
-	return ""
+	// macOS code signing fields
+	SigningID       string // macOS code signing identity
+	TeamID          string // macOS team identifier
+	CDHashHex       string // macOS code directory hash
+	Flags           uint32 // macOS codesign flags
+	Signed          bool   // whether binary is code signed
+	ValidSignature  bool   // whether signature is valid
+	HasEntitlements bool   // whether binary has entitlements
 }
 
 // String returns a human-readable representation of PeerInfo
 func (pi PeerInfo) String() string {
-	if pi.Path != "" {
-		return fmt.Sprintf("PID:%d Path:%s UID:%d GID:%d", pi.PID, pi.Path, pi.UID, pi.GID)
+	if pi.ExecutablePath != "" {
+		switch runtime.GOOS {
+		case "linux":
+			return fmt.Sprintf("PID:%d Path:%s UID:%d GID:%d", pi.PID, pi.ExecutablePath, pi.UID, pi.GID)
+		case "darwin":
+			if pi.Signed {
+				return fmt.Sprintf("PID:%d Path:%s Signed:%s Team:%s", pi.PID, pi.ExecutablePath, pi.SigningID, pi.TeamID)
+			}
+			return fmt.Sprintf("PID:%d Path:%s Unsigned", pi.PID, pi.ExecutablePath)
+		default:
+			return fmt.Sprintf("PID:%d Path:%s", pi.PID, pi.ExecutablePath)
+		}
 	}
-	return fmt.Sprintf("PID:%d UID:%d GID:%d", pi.PID, pi.UID, pi.GID)
+	return fmt.Sprintf("PID:%d", pi.PID)
 }
+
+// PeerFromUnixConn extracts peer credentials from a *net.UnixConn using platform-specific implementation
+func PeerFromUnixConn(conn *net.UnixConn) (*PeerInfo, error) {
+	return InspectPeerProcess(conn)
+}
+
+// exePathForPID is now handled by platform-specific implementations

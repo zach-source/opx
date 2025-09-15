@@ -1,8 +1,6 @@
 package security
 
 import (
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -10,10 +8,10 @@ import (
 
 func TestPeerInfo_String(t *testing.T) {
 	pi := PeerInfo{
-		PID:  12345,
-		UID:  1000,
-		GID:  1000,
-		Path: "/usr/bin/example",
+		PID:            12345,
+		UID:            1000,
+		GID:            1000,
+		ExecutablePath: "/usr/bin/example",
 	}
 
 	str := pi.String()
@@ -30,34 +28,7 @@ func TestPeerInfo_String(t *testing.T) {
 	}
 }
 
-func TestExePathForPID(t *testing.T) {
-	// Test with current process PID
-	currentPID := os.Getpid()
-	path := exePathForPID(currentPID)
-
-	if path == "" {
-		t.Skip("Could not determine executable path for current process (may be expected in some environments)")
-	}
-
-	t.Logf("Current process executable path: %s", path)
-
-	// Path should be absolute on successful detection
-	if path != "" && !filepath.IsAbs(path) {
-		t.Errorf("Expected absolute path, got relative: %s", path)
-	}
-}
-
-func TestExePathForPID_InvalidPID(t *testing.T) {
-	// Test with invalid PIDs
-	testCases := []int{0, -1, -999, 999999}
-
-	for _, pid := range testCases {
-		path := exePathForPID(pid)
-		if path != "" {
-			t.Errorf("Expected empty path for invalid PID %d, got %s", pid, path)
-		}
-	}
-}
+// exePathForPID tests removed - now handled by platform-specific implementations
 
 // Integration test for peer credential extraction (requires Unix socket)
 func TestPeerFromUnixConn_Integration(t *testing.T) {

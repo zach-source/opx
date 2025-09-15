@@ -70,7 +70,7 @@ func ScanRecentDenials(since time.Duration) ([]DenialEvent, error) {
 			}
 
 			// Create unique key for this process+reference combination
-			key := fmt.Sprintf("%s|%s", event.PeerInfo.Path, event.Reference)
+			key := fmt.Sprintf("%s|%s", event.PeerInfo.ExecutablePath, event.Reference)
 
 			if existing, exists := denials[key]; exists {
 				existing.Count++
@@ -82,7 +82,7 @@ func ScanRecentDenials(since time.Duration) ([]DenialEvent, error) {
 				denials[key] = &DenialEvent{
 					Timestamp: event.Timestamp,
 					PID:       event.PeerInfo.PID,
-					Path:      event.PeerInfo.Path,
+					Path:      event.PeerInfo.ExecutablePath,
 					Reference: event.Reference,
 					Count:     1,
 				}

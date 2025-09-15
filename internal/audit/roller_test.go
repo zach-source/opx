@@ -185,7 +185,7 @@ func TestNewLoggerWithRoller(t *testing.T) {
 	event := AuditEvent{
 		Event:    "TEST_EVENT",
 		Decision: "TEST",
-		PeerInfo: security.PeerInfo{PID: 123, Path: "/usr/bin/test"},
+		PeerInfo: security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"},
 	}
 
 	logger.LogEvent(event)

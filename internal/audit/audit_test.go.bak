@@ -71,7 +71,7 @@ func TestLogger_LogEvent(t *testing.T) {
 	event := AuditEvent{
 		Event:     "TEST_EVENT",
 		Decision:  "SUCCESS",
-		PeerInfo:  security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/test"},
+		PeerInfo:  security.PeerInfo{PID: 123, Path: "/usr/bin/test"},
 		Reference: "test://reference",
 		Details:   map[string]string{"test": "value"},
 	}
@@ -132,7 +132,7 @@ func TestLogger_LogAccessDecision(t *testing.T) {
 	}
 	defer logger.Close()
 
-	peerInfo := security.PeerInfo{PID: 456, ExecutablePath: "/usr/bin/kubectl"}
+	peerInfo := security.PeerInfo{PID: 456, Path: "/usr/bin/kubectl"}
 	reference := "op://Production/k8s/token"
 
 	// Test both allow and deny decisions
@@ -193,7 +193,7 @@ func TestIntegrityManager_SignAndVerify(t *testing.T) {
 	event := AuditEvent{
 		Event:     "TEST_SIGNING",
 		Decision:  "TEST",
-		PeerInfo:  security.PeerInfo{PID: 789, ExecutablePath: "/usr/bin/test"},
+		PeerInfo:  security.PeerInfo{PID: 789, Path: "/usr/bin/test"},
 		Reference: "vault://secret/test",
 	}
 
@@ -294,7 +294,7 @@ func TestAuditLogRotation(t *testing.T) {
 	event := AuditEvent{
 		Event:    "ROTATION_TEST",
 		Decision: "SUCCESS",
-		PeerInfo: security.PeerInfo{PID: 999, ExecutablePath: "/usr/bin/rotation-test"},
+		PeerInfo: security.PeerInfo{PID: 999, Path: "/usr/bin/rotation-test"},
 	}
 
 	logger.LogEvent(event)
@@ -360,7 +360,7 @@ func BenchmarkLogger_LogEvent(b *testing.B) {
 	event := AuditEvent{
 		Event:     "BENCHMARK_EVENT",
 		Decision:  "ALLOW",
-		PeerInfo:  security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/benchmark"},
+		PeerInfo:  security.PeerInfo{PID: 123, Path: "/usr/bin/benchmark"},
 		Reference: "op://vault/item/field",
 		Details:   map[string]string{"test": "benchmark"},
 	}
@@ -391,7 +391,7 @@ func BenchmarkIntegrityManager_SignEvent(b *testing.B) {
 	event := AuditEvent{
 		Event:     "BENCHMARK_SIGNING",
 		Decision:  "TEST",
-		PeerInfo:  security.PeerInfo{PID: 123, ExecutablePath: "/usr/bin/benchmark"},
+		PeerInfo:  security.PeerInfo{PID: 123, Path: "/usr/bin/benchmark"},
 		Reference: "benchmark://reference",
 	}
 

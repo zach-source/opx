@@ -85,7 +85,7 @@ func (l *Logger) LogEvent(event AuditEvent) {
 		event.Event,
 		event.Decision,
 		event.PeerInfo.PID,
-		event.PeerInfo.Path,
+		event.PeerInfo.ExecutablePath,
 		event.Reference,
 		formatDetails(event.Details))
 }
