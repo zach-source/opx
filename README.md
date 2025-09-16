@@ -35,40 +35,78 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
 
 ```bash
 # Add the tap
-brew tap zach-source/tap
+brew tap zach-source/homebrew-tap
 
 # Install opx
 brew install opx
 
-# Start as a service
+# Start as a service (automatically starts on boot)
 brew services start opx
+
+# Or run manually
+opx-authd --enable-audit-log --verbose
 ```
 
 ### Nix (Declarative Installation)
 
 ```bash
-# Install directly
+# Install directly to profile
 nix profile install github:zach-source/nix-packages#opx
 
-# Or add to your home-manager configuration
+# Or run without installing
+nix run github:zach-source/nix-packages#opx
+
+# Enter development environment
+nix develop github:zach-source/nix-packages
 ```
 
-**Home Manager Integration:**
+**Home Manager Integration (Recommended):**
 ```nix
 {
-  inputs.utils.url = "github:zach-source/nix-packages";
-  
-  # In your home-manager configuration:
-  imports = [ inputs.utils.homeManagerModules.opx ];
-  
-  services.opx-authd = {
-    enable = true;
-    backend = "multi";
-    enableAuditLog = true;
-    sessionTimeout = 8;
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    zach-utils.url = "github:zach-source/nix-packages";
+  };
+
+  outputs = { nixpkgs, home-manager, zach-utils, ... }: {
+    homeConfigurations."your-username" = home-manager.lib.homeManagerConfiguration {
+      modules = [
+        zach-utils.homeManagerModules.opx
+        {
+          services.opx-authd = {
+            enable = true;
+            backend = "multi";
+            enableAuditLog = true;
+            sessionTimeout = 8;
+            auditLogRetentionDays = 90;
+            
+            # Optional: Define access policies declaratively
+            policy = {
+              allow = [
+                {
+                  path = "/usr/bin/kubectl";
+                  refs = [ "op://Production/k8s/*" ];
+                  require_signed = true;
+                }
+              ];
+              default_deny = true;
+            };
+          };
+        }
+      ];
+    };
   };
 }
 ```
+
+**Service Configuration Options:**
+- `backend`: opcli, vault, bao, multi, fake
+- `sessionTimeout`: Hours before session lock (default: 8)
+- `enableAuditLog`: Enable structured audit logging
+- `auditLogRetentionDays`: Days to keep audit logs (default: 30)
+- `policy`: Access control policy (JSON format)
+- `environmentFile`: Path to file with VAULT_TOKEN, etc.
 
 ### From Source
 
@@ -79,29 +117,32 @@ make build
 # Binaries in ./bin: opx-authd, opx
 ```
 
-## Run Daemon
+## Usage
+
+### Quick Start (Any Installation Method)
+
 ```bash
-# 1Password only (default)
-./bin/opx-authd --backend=opcli --verbose
+# Login to 1Password
+opx login 1password --account=YOUR_ACCOUNT
 
-# HashiCorp Vault only
-./bin/opx-authd --backend=vault --verbose
+# Start daemon (if not using service)
+opx-authd --backend=multi --enable-audit-log --verbose
 
-# OpenBao only  
-./bin/opx-authd --backend=bao --verbose
+# Read secrets from any backend
+opx read "op://vault/item/field"              # 1Password
+opx read "vault://secret/myapp/config#pass"   # Vault
+opx read "bao://kv/prod/api#key"             # Bao
+```
 
-# Multi-backend (route based on URI scheme)
-./bin/opx-authd --backend=multi --verbose
+### Advanced Authentication
 
-# All security options enabled
-./bin/opx-authd \
-  --backend=multi \
-  --ttl 120 \
-  --session-timeout 8 \
-  --enable-session-lock=true \
-  --lock-on-auth-failure=true \
-  --enable-audit-log \
-  --verbose
+```bash
+# Self-authentication using credential references
+opx login vault --token-ref="op://vault/vault-token/value"
+opx login vault --username-ref="op://vault/creds/user" --password-ref="op://vault/creds/pass"
+
+# Multi-backend workflows
+opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 ```
 
 ### Security and Audit Options
