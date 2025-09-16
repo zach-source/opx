@@ -79,15 +79,24 @@ Architecture:
 
 success "Git tag ${VERSION} created"
 
-# Check for signing credentials
-if [[ -n "${APPLE_DEVELOPER_ID:-}" ]] && [[ -n "${MACOS_SIGN_P12:-}" ]]; then
+# Check for signing credentials (using GoReleaser standard env vars)
+if [[ -n "${MACOS_SIGN_P12:-}" ]] && [[ -n "${MACOS_SIGN_PASSWORD:-}" ]]; then
     info "Apple Developer credentials detected - macOS binaries will be signed"
+    if [[ -n "${MACOS_NOTARY_ISSUER_ID:-}" ]] && [[ -n "${MACOS_NOTARY_KEY_ID:-}" ]] && [[ -n "${MACOS_NOTARY_KEY:-}" ]]; then
+        info "Apple notarization credentials detected - binaries will be notarized"
+    else
+        warn "Notarization credentials missing - binaries will be signed but not notarized"
+    fi
 else
     warn "Apple Developer credentials not set - macOS binaries will not be signed"
     warn "To enable signing, set these environment variables:"
-    warn "  export APPLE_DEVELOPER_ID='Developer ID Application: Your Name (TEAMID)'"
-    warn "  export MACOS_SIGN_P12='path/to/certificate.p12'"
+    warn "  export MACOS_SIGN_P12='base64-encoded-certificate.p12'"
     warn "  export MACOS_SIGN_PASSWORD='certificate-password'"
+    warn ""
+    warn "For notarization, also set:"
+    warn "  export MACOS_NOTARY_ISSUER_ID='your-issuer-uuid'"
+    warn "  export MACOS_NOTARY_KEY_ID='your-key-id'"
+    warn "  export MACOS_NOTARY_KEY='base64-encoded-api-key.p8'"
 fi
 
 if [[ -n "${GPG_FINGERPRINT:-}" ]]; then
