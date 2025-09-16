@@ -530,12 +530,31 @@ func handleLoginCommand(opFlags []string) {
 func handleVaultLoginCommand(args []string) {
 	var address string
 	var method string
+	var usernameRef string
+	var passwordRef string
+	var tokenRef string
 
 	// Parse vault-login specific flags
 	vaultFlags := flag.NewFlagSet("vault-login", flag.ExitOnError)
 	vaultFlags.StringVar(&address, "address", "http://localhost:8200", "Vault server address")
 	vaultFlags.StringVar(&method, "method", "userpass", "authentication method (token|userpass)")
+	vaultFlags.StringVar(&usernameRef, "username-ref", "", "secret reference for username (e.g., op://vault/creds/username)")
+	vaultFlags.StringVar(&passwordRef, "password-ref", "", "secret reference for password (e.g., op://vault/creds/password)")
+	vaultFlags.StringVar(&tokenRef, "token-ref", "", "secret reference for token (e.g., op://vault/token/value)")
 	vaultFlags.Parse(args)
+
+	// Check for credential references (self-authentication)
+	if tokenRef != "" || usernameRef != "" || passwordRef != "" {
+		fmt.Printf("Using self-authentication with credential references...\n")
+		err := performSelfAuthentication(address, method, tokenRef, usernameRef, passwordRef)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Self-authentication failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ Self-authentication successful!")
+		fmt.Printf("Vault credentials stored. Start daemon with: ./bin/opx-authd --backend=vault --verbose\n")
+		return
+	}
 
 	fmt.Printf("Logging into Vault at %s using %s authentication...\n", address, method)
 
@@ -543,6 +562,8 @@ func handleVaultLoginCommand(args []string) {
 	case "token":
 		fmt.Println("For token authentication, set the VAULT_TOKEN environment variable:")
 		fmt.Println("  export VAULT_TOKEN=your-vault-token")
+		fmt.Println("Or use credential reference:")
+		fmt.Println("  opx login vault --token-ref=\"op://vault/vault-token/value\"")
 		fmt.Println("Then start the daemon with:")
 		fmt.Printf("  ./bin/opx-authd --backend=vault --verbose\n")
 
@@ -553,8 +574,8 @@ func handleVaultLoginCommand(args []string) {
 		fmt.Println("   export VAULT_USERNAME=your-username")
 		fmt.Println("   export VAULT_PASSWORD=your-password")
 		fmt.Println("")
-		fmt.Println("2. Or use vault CLI to login:")
-		fmt.Println("   vault auth -method=userpass username=your-username")
+		fmt.Println("2. Or use credential references:")
+		fmt.Println("   opx login vault --username-ref=\"op://vault/vault-creds/username\" --password-ref=\"op://vault/vault-creds/password\"")
 		fmt.Println("")
 		fmt.Println("3. Start daemon:")
 		fmt.Println("   ./bin/opx-authd --backend=vault --verbose")
@@ -1198,10 +1219,14 @@ Backends:
   vault [--address=URL] [--method=M]  # Login to HashiCorp Vault  
   bao [--address=URL] [--method=M]    # Login to OpenBao
 
+Self-Authentication (Credential Chaining):
+  vault [--username-ref=REF] [--password-ref=REF] [--token-ref=REF]
+  bao [--token-ref=REF] [--username-ref=REF] [--password-ref=REF]
+
 Examples:
   opx login 1password --account=MYACCOUNT
-  opx login vault --address=https://vault.company.com --method=userpass
-  opx login bao --method=token
+  opx login vault --username-ref="op://vault/vault-creds/username" --password-ref="op://vault/vault-creds/password"
+  opx login bao --token-ref="op://vault/bao-token/value"
 `)
 }
 
@@ -1243,4 +1268,114 @@ func handleBaoLoginCommand(args []string) {
 	fmt.Println("")
 	fmt.Println("After authentication, you can read Bao secrets:")
 	fmt.Println("  opx read 'bao://kv/production/api#key'")
+}
+
+// performSelfAuthentication handles automated authentication using credential references
+func performSelfAuthentication(address, method, tokenRef, usernameRef, passwordRef string) error {
+	ctx := context.Background()
+
+	// Create a client to read credential references
+	cli, err := client.New()
+	if err != nil {
+		return fmt.Errorf("failed to create client: %w", err)
+	}
+
+	if err := cli.EnsureReady(ctx); err != nil {
+		return fmt.Errorf("daemon not ready: %w", err)
+	}
+
+	switch method {
+	case "token":
+		if tokenRef == "" {
+			return fmt.Errorf("token-ref required for token authentication")
+		}
+
+		fmt.Printf("Reading token from: %s\n", tokenRef)
+		tokenResp, err := cli.Read(ctx, tokenRef)
+		if err != nil {
+			return fmt.Errorf("failed to read token reference: %w", err)
+		}
+
+		// Store token in environment file for daemon usage
+		return storeVaultCredentials(map[string]string{
+			"VAULT_ADDR":  address,
+			"VAULT_TOKEN": tokenResp.Value,
+		})
+
+	case "userpass":
+		if usernameRef == "" || passwordRef == "" {
+			return fmt.Errorf("both username-ref and password-ref required for userpass authentication")
+		}
+
+		fmt.Printf("Reading credentials from: %s, %s\n", usernameRef, passwordRef)
+
+		// Read username
+		usernameResp, err := cli.Read(ctx, usernameRef)
+		if err != nil {
+			return fmt.Errorf("failed to read username reference: %w", err)
+		}
+
+		// Read password
+		passwordResp, err := cli.Read(ctx, passwordRef)
+		if err != nil {
+			return fmt.Errorf("failed to read password reference: %w", err)
+		}
+
+		// Store credentials in environment file for daemon usage
+		return storeVaultCredentials(map[string]string{
+			"VAULT_ADDR":     address,
+			"VAULT_USERNAME": usernameResp.Value,
+			"VAULT_PASSWORD": passwordResp.Value,
+		})
+
+	default:
+		return fmt.Errorf("unsupported authentication method: %s", method)
+	}
+}
+
+// storeVaultCredentials stores Vault credentials in a secure environment file
+func storeVaultCredentials(credentials map[string]string) error {
+	// Get config directory
+	configDir, err := getConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config directory: %w", err)
+	}
+
+	credFile := filepath.Join(configDir, "vault.env")
+
+	// Create credentials file content
+	var content strings.Builder
+	content.WriteString("# Vault credentials (auto-generated by opx self-authentication)\n")
+	content.WriteString("# This file contains sensitive information - keep secure\n")
+	content.WriteString("\n")
+
+	for key, value := range credentials {
+		content.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+	}
+
+	// Write securely
+	if err := os.WriteFile(credFile, []byte(content.String()), 0600); err != nil {
+		return fmt.Errorf("failed to write credentials file: %w", err)
+	}
+
+	fmt.Printf("Credentials stored in: %s\n", credFile)
+	fmt.Println("Start daemon with: VAULT_ENV_FILE=" + credFile + " ./bin/opx-authd --backend=vault")
+
+	return nil
+}
+
+// getConfigDir gets the XDG config directory (simplified version)
+func getConfigDir() (string, error) {
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		dir := filepath.Join(xdgConfig, "opx-authd")
+		return dir, os.MkdirAll(dir, 0700)
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	dir := filepath.Join(homeDir, ".config", "opx-authd")
+	return dir, os.MkdirAll(dir, 0700)
 }

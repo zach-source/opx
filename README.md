@@ -178,7 +178,56 @@ bao://database/config               # Database configuration
 bao://pki/ca_chain                 # PKI certificate chain
 ```
 
-**Note**: Vault and Bao backends require proper authentication and configuration. The daemon currently supports token-based authentication.
+**Note**: Vault and Bao backends require proper authentication and configuration. The daemon supports token-based and userpass authentication.
+
+## Self-Authentication Chain
+
+Use opx to provide credentials to itself for automated workflows:
+
+### Vault Authentication Using 1Password
+
+```bash
+# Store Vault credentials in 1Password first
+# op://vault/vault-creds/username -> "myuser"  
+# op://vault/vault-creds/password -> "mypass"
+
+# Use opx to authenticate to Vault using 1Password credentials
+opx login vault --username-ref="op://vault/vault-creds/username" --password-ref="op://vault/vault-creds/password"
+
+# Credentials are automatically stored for daemon usage
+# Start Vault-enabled daemon
+./bin/opx-authd --backend=vault --verbose
+```
+
+### Token-Based Self-Authentication
+
+```bash
+# Store Vault token in 1Password
+# op://vault/vault-token/value -> "hvs.your-token-here"
+
+# Use opx to set up Vault authentication
+opx login vault --method=token --token-ref="op://vault/vault-token/value"
+
+# Start daemon with stored credentials
+./bin/opx-authd --backend=vault --verbose
+```
+
+### Cross-Backend Workflows
+
+```bash
+# 1. Login to 1Password
+opx login 1password --account=YOUR_ACCOUNT
+
+# 2. Use 1Password to authenticate to Vault
+opx login vault --token-ref="op://vault/vault-token/value"
+
+# 3. Start multi-backend daemon
+./bin/opx-authd --backend=multi --verbose
+
+# 4. Access secrets from all backends
+opx read "op://vault/item/field"        # 1Password
+opx read "vault://secret/app#key"       # Vault (authenticated via 1Password)
+```
 
 ## Security Notes
 - **TLS encryption** over Unix domain socket protects all client-server communication
