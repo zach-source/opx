@@ -185,4 +185,4 @@ release:
     - **Linux** or **macOS** (Windows support planned)
 
 gomod:
-  proxy: true
+  proxy: false
