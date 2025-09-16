@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// csInfo type defined in codesign_darwin.go
+
 // InspectPeerProcess extracts the peer PID from a *Unix* domain socket connection,
 // verifies its code signature, and returns details about the signed binary.
 //
