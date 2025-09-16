@@ -31,8 +31,10 @@ Usage:
   opx audit [--since=24h|2d|1w] [--interactive]
   opx verify-audit [--file=path] [--since=7d|1w|1M] [--all]
   opx policy <subcommand> [options]
-  opx login [--account=ACCOUNT]
-  opx vault-login [--address=URL] [--method=userpass]
+  opx login <backend> [options]
+  opx login 1password [--account=ACCOUNT]
+  opx login vault [--address=URL] [--method=userpass]
+  opx login bao [--address=URL] [--method=token]
 
 Commands:
   read                  # Read secret references (op://, vault://, bao://)
@@ -42,8 +44,7 @@ Commands:
   audit                # Manage access control policies
   verify-audit         # Verify audit log integrity
   policy               # Advanced policy management (list, add, remove, test)
-  login                # Login to 1Password account
-  vault-login          # Login to HashiCorp Vault or OpenBao
+  login                # Login to backends (1password, vault, bao)
 
 Global Flags:
   --account=ACCOUNT     # 1Password account to use
@@ -123,9 +124,11 @@ func main() {
 		handleAuditCommand(cmdArgs)
 		return
 	case "login":
-		handleLoginCommand(opFlags)
+		handlePluggableLoginCommand(cmdArgs, opFlags)
 		return
 	case "vault-login":
+		// Deprecated - redirect to new structure
+		fmt.Println("⚠️  'vault-login' is deprecated. Use: opx login vault [options]")
 		handleVaultLoginCommand(cmdArgs)
 		return
 	case "verify-audit":
@@ -1159,4 +1162,85 @@ func verifySinceAuditFiles(integrityManager *audit.IntegrityManager, since strin
 		fmt.Printf("⚠️  Some audit logs from last %s failed verification.\n", since)
 		os.Exit(1)
 	}
+}
+
+func handlePluggableLoginCommand(args []string, opFlags []string) {
+	if len(args) < 1 {
+		printLoginUsage()
+		return
+	}
+
+	backend := args[0]
+	backendArgs := args[1:]
+
+	switch backend {
+	case "1password":
+		handleLoginCommand(opFlags)
+	case "vault":
+		handleVaultLoginCommand(backendArgs)
+	case "bao":
+		handleBaoLoginCommand(backendArgs)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown backend: %s\n", backend)
+		printLoginUsage()
+		os.Exit(1)
+	}
+}
+
+func printLoginUsage() {
+	fmt.Fprintf(os.Stderr, `opx login - Backend authentication
+
+Usage:
+  opx login <backend> [options]
+
+Backends:
+  1password [--account=ACCOUNT]       # Login to 1Password account
+  vault [--address=URL] [--method=M]  # Login to HashiCorp Vault  
+  bao [--address=URL] [--method=M]    # Login to OpenBao
+
+Examples:
+  opx login 1password --account=MYACCOUNT
+  opx login vault --address=https://vault.company.com --method=userpass
+  opx login bao --method=token
+`)
+}
+
+func handleBaoLoginCommand(args []string) {
+	var address string
+	var method string
+
+	// Parse bao-login specific flags
+	baoFlags := flag.NewFlagSet("login-bao", flag.ExitOnError)
+	baoFlags.StringVar(&address, "address", "http://localhost:8300", "Bao server address")
+	baoFlags.StringVar(&method, "method", "token", "authentication method (token|userpass)")
+	baoFlags.Parse(args)
+
+	fmt.Printf("Logging into Bao at %s using %s authentication...\n", address, method)
+
+	switch method {
+	case "token":
+		fmt.Println("For token authentication, set the BAO_TOKEN environment variable:")
+		fmt.Println("  export BAO_TOKEN=your-bao-token")
+		fmt.Println("Then start the daemon with:")
+		fmt.Printf("  ./bin/opx-authd --backend=bao --verbose\n")
+
+	case "userpass":
+		fmt.Println("For userpass authentication:")
+		fmt.Println("1. Set environment variables:")
+		fmt.Println("   export BAO_ADDR=" + address)
+		fmt.Println("   export BAO_USERNAME=your-username")
+		fmt.Println("   export BAO_PASSWORD=your-password")
+		fmt.Println("")
+		fmt.Println("2. Start daemon:")
+		fmt.Println("   ./bin/opx-authd --backend=bao --verbose")
+
+	default:
+		fmt.Fprintf(os.Stderr, "Unsupported authentication method: %s\n", method)
+		fmt.Println("Supported methods: token, userpass")
+		os.Exit(1)
+	}
+
+	fmt.Println("")
+	fmt.Println("After authentication, you can read Bao secrets:")
+	fmt.Println("  opx read 'bao://kv/production/api#key'")
 }

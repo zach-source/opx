@@ -31,33 +31,43 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
 
 ## Install
 
-### From GitHub Releases (Recommended)
-
-Download pre-built binaries for your platform:
+### Homebrew (Recommended for macOS)
 
 ```bash
-# Download latest release
-gh release download -R zach-source/opx
+# Add the tap
+brew tap zach-source/tap
 
-# Or download specific version
-gh release download v1.0.0 -R zach-source/opx
+# Install opx
+brew install opx
 
-# Make binaries executable
-chmod +x opx-authd-* opx-*
-
-# Rename for your platform (example for Linux x86_64)
-mv opx-authd-linux-amd64 opx-authd
-mv opx-linux-amd64 opx
+# Start as a service
+brew services start opx
 ```
 
-### Verify Downloads
+### Nix (Declarative Installation)
 
 ```bash
-# Verify checksums (recommended)
-sha256sum -c checksums.txt
+# Install directly
+nix profile install github:zach-source/nix-packages#opx
 
-# Verify GPG signature (if available)
-gpg --verify checksums.txt.sig checksums.txt
+# Or add to your home-manager configuration
+```
+
+**Home Manager Integration:**
+```nix
+{
+  inputs.utils.url = "github:zach-source/nix-packages";
+  
+  # In your home-manager configuration:
+  imports = [ inputs.utils.homeManagerModules.opx ];
+  
+  services.opx-authd = {
+    enable = true;
+    backend = "multi";
+    enableAuditLog = true;
+    sessionTimeout = 8;
+  };
+}
 ```
 
 ### From Source
