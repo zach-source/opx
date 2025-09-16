@@ -10,7 +10,7 @@ builds:
     main: ./cmd/opx-authd
     binary: opx-authd
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - darwin
     goarch:
@@ -29,7 +29,7 @@ builds:
     main: ./cmd/opx
     binary: opx
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - darwin
     goarch:
