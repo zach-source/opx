@@ -59,9 +59,18 @@ func ScanRecentDenials(since time.Duration) ([]DenialEvent, error) {
 				continue
 			}
 
+			// Try to parse as HMAC-signed event first (new format)
+			var secureEvent SecureAuditEvent
 			var event AuditEvent
-			if err := json.Unmarshal([]byte(line), &event); err != nil {
-				continue // Skip malformed lines
+
+			if err := json.Unmarshal([]byte(line), &secureEvent); err == nil {
+				// Successfully parsed as secure event
+				event = secureEvent.Event
+			} else {
+				// Try parsing as plain event (legacy format)
+				if err := json.Unmarshal([]byte(line), &event); err != nil {
+					continue // Skip malformed lines
+				}
 			}
 
 			// Only interested in recent access denials

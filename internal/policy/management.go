@@ -104,6 +104,20 @@ func (pm *PolicyManager) TestAccess(peer security.PeerInfo, ref string) (bool, s
 	return false, "Denied by policy"
 }
 
+// TestAccessDetailed provides comprehensive policy evaluation with step-by-step breakdown
+func (pm *PolicyManager) TestAccessDetailed(peer security.PeerInfo, ref string) PolicyEvaluationResult {
+	pol, _, err := Load()
+	if err != nil {
+		return PolicyEvaluationResult{
+			Decision: "ERROR",
+			Reason:   fmt.Sprintf("Failed to load policy: %v", err),
+			Steps:    []PolicyEvaluationStep{},
+		}
+	}
+
+	return EvaluatePolicy(pol, peer, ref)
+}
+
 // CreateRuleFromPeerInfo creates a rule suggestion based on peer information
 func (pm *PolicyManager) CreateRuleFromPeerInfo(peer security.PeerInfo, ref string, scope string) Rule {
 	rule := Rule{

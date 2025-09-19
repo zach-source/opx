@@ -29,6 +29,7 @@ Usage:
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
   opx audit [--since=24h|2d|1w] [--interactive]
+  opx audit failures [--since=24h] [--process=PATH] [--reference=REF]
   opx verify-audit [--file=path] [--since=7d|1w|1M] [--all]
   opx policy <subcommand> [options]
   opx login <backend> [options]
@@ -260,6 +261,12 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func handleAuditCommand(args []string) {
+	// Check for subcommands first
+	if len(args) > 0 && args[0] == "failures" {
+		handleAuditFailuresCommand(args[1:])
+		return
+	}
+
 	var since string
 	var interactive bool
 
@@ -397,6 +404,98 @@ func parseSelection(input string) []int {
 	}
 
 	return indices
+}
+
+func handleAuditFailuresCommand(args []string) {
+	var since string
+	var processFilter string
+	var referenceFilter string
+
+	// Parse audit failures flags
+	failuresFlags := flag.NewFlagSet("audit-failures", flag.ExitOnError)
+	failuresFlags.StringVar(&since, "since", "24h", "show failures from last duration")
+	failuresFlags.StringVar(&processFilter, "process", "", "filter by process path")
+	failuresFlags.StringVar(&referenceFilter, "reference", "", "filter by secret reference")
+	failuresFlags.Parse(args)
+
+	sinceData, err := util.ParseDuration(since)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid duration %s: %v\n", since, err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("🔍 Scanning for access failures in the last %s...\n", since)
+
+	// Get denials with filtering
+	denials, err := audit.ScanRecentDenials(sinceData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to scan denials: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Apply filters
+	var filteredDenials []audit.DenialEvent
+	for _, denial := range denials {
+		if processFilter != "" && !strings.Contains(denial.Path, processFilter) {
+			continue
+		}
+		if referenceFilter != "" && !strings.Contains(denial.Reference, referenceFilter) {
+			continue
+		}
+		filteredDenials = append(filteredDenials, denial)
+	}
+
+	if len(filteredDenials) == 0 {
+		fmt.Println("✅ No access failures found with current filters.")
+		if processFilter != "" || referenceFilter != "" {
+			fmt.Println("Try removing filters or extending the time range.")
+		}
+		return
+	}
+
+	fmt.Printf("❌ Found %d access failures:\n\n", len(filteredDenials))
+
+	for i, denial := range filteredDenials {
+		fmt.Printf("🚫 Failure #%d:\n", i+1)
+		fmt.Printf("   Process: %s\n", denial.Path)
+		fmt.Printf("   Reference: %s\n", denial.Reference)
+		fmt.Printf("   Count: %d failures\n", denial.Count)
+		fmt.Printf("   Last: %s\n", denial.Timestamp.Format("2006-01-02 15:04:05"))
+
+		// Try to determine why it failed using policy debug
+		fmt.Printf("   💡 Quick Analysis:\n")
+
+		// Create peer info for analysis
+		peer := security.PeerInfo{
+			PID:            denial.PID,
+			ExecutablePath: denial.Path,
+			Signed:         true, // Assume signed for analysis
+			ValidSignature: true,
+		}
+
+		// Load policy and do quick evaluation
+		pm, err := policy.NewPolicyManager()
+		if err == nil {
+			evaluation := pm.TestAccessDetailed(peer, denial.Reference)
+			if len(evaluation.Steps) > 0 {
+				// Show the most relevant failure reason
+				for _, step := range evaluation.Steps {
+					if step.Result == "FAIL" {
+						fmt.Printf("      → %s: %s\n", step.Check, step.Reason)
+						break
+					}
+				}
+			} else {
+				fmt.Printf("      → %s\n", evaluation.Reason)
+			}
+		}
+
+		fmt.Println()
+	}
+
+	fmt.Println("💡 To fix these failures:")
+	fmt.Println("   opx policy add --interactive    # Create rules from failures")
+	fmt.Printf("   opx policy debug <process> <ref> # Detailed analysis\n")
 }
 
 // AccessAttempt represents an access attempt from audit logs
@@ -666,6 +765,8 @@ func handlePolicyCommand(args []string) {
 		handlePolicyRemove(subArgs)
 	case "test":
 		handlePolicyTest(subArgs)
+	case "debug":
+		handlePolicyDebug(subArgs)
 	case "review":
 		handlePolicyReview(subArgs)
 	default:
@@ -681,6 +782,7 @@ Usage:
   opx policy add [--interactive]            # Add new policy rule
   opx policy remove <rule-index>            # Remove policy rule by index
   opx policy test <process-path> <ref>      # Test if access would be allowed
+  opx policy debug <process-path> <ref>     # Detailed rule evaluation breakdown
   opx policy review [--since=24h]          # Review recent access and approve/deny
 
 Examples:
@@ -688,6 +790,7 @@ Examples:
   opx policy add --interactive             # Interactive rule creation
   opx policy remove 2                      # Remove rule #2
   opx policy test /usr/bin/kubectl op://prod/k8s/token
+  opx policy debug /usr/bin/kubectl op://prod/k8s/token # Detailed evaluation
   opx policy review --since=1h             # Review last hour's access attempts
 `)
 }
@@ -873,6 +976,70 @@ func handlePolicyTest(args []string) {
 	} else {
 		fmt.Printf("❌ DENY: %s cannot access %s\n", processPath, reference)
 		fmt.Printf("Reason: %s\n", reason)
+	}
+}
+
+func handlePolicyDebug(args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: opx policy debug <process-path> <reference>")
+		fmt.Println("Example: opx policy debug /nix/store/.../opx op://Private/AnthropicAPI/credential")
+		return
+	}
+
+	processPath := args[0]
+	reference := args[1]
+
+	// Create mock peer info for debugging
+	peer := security.PeerInfo{
+		PID:            999999, // Mock PID
+		ExecutablePath: processPath,
+		Signed:         true,    // Assume signed for debugging
+		ValidSignature: true,    // Assume valid for debugging
+		SigningID:      "debug", // Mock signing ID
+	}
+
+	pm, err := policy.NewPolicyManager()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create policy manager: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get detailed evaluation
+	evaluation := pm.TestAccessDetailed(peer, reference)
+
+	fmt.Printf("🔍 Policy Evaluation Debug for:\n")
+	fmt.Printf("   Process: %s\n", processPath)
+	fmt.Printf("   Reference: %s\n", reference)
+	fmt.Printf("   Decision: %s\n", evaluation.Decision)
+	fmt.Printf("   Reason: %s\n\n", evaluation.Reason)
+
+	if len(evaluation.Steps) > 0 {
+		fmt.Println("📋 Rule Evaluation Steps:")
+		for _, step := range evaluation.Steps {
+			status := "❌"
+			if step.Result == "PASS" {
+				status = "✅"
+			} else if step.Result == "SKIP" {
+				status = "⏭️"
+			}
+
+			fmt.Printf("   %s %s: %s\n", status, step.Check, step.Reason)
+			if step.Expected != "" && step.Actual != "" {
+				fmt.Printf("      Expected: %s\n", step.Expected)
+				fmt.Printf("      Actual: %s\n", step.Actual)
+			}
+		}
+	} else {
+		fmt.Println("📋 No detailed steps available (using simplified evaluation)")
+	}
+
+	fmt.Println()
+	if evaluation.Decision == "DENY" {
+		fmt.Println("💡 Suggestions:")
+		fmt.Println("   - Check if process path is correct")
+		fmt.Println("   - Verify signing requirements")
+		fmt.Println("   - Review reference patterns in matching rules")
+		fmt.Println("   - Use: opx policy add --interactive to create a rule")
 	}
 }
 

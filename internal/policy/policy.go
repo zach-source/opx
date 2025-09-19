@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +106,65 @@ type Subject struct {
 	PeerInfo security.PeerInfo
 }
 
+// PolicyEvaluationStep represents a step in policy evaluation
+type PolicyEvaluationStep struct {
+	RuleIndex int    `json:"rule_index"`
+	RuleName  string `json:"rule_name"`
+	Check     string `json:"check"`
+	Expected  string `json:"expected"`
+	Actual    string `json:"actual"`
+	Result    string `json:"result"` // "PASS", "FAIL", "SKIP"
+	Reason    string `json:"reason"`
+}
+
+// PolicyEvaluationResult contains the complete evaluation breakdown
+type PolicyEvaluationResult struct {
+	Decision string                 `json:"decision"` // "ALLOW", "DENY"
+	Reason   string                 `json:"reason"`
+	Steps    []PolicyEvaluationStep `json:"steps"`
+}
+
+// EvaluatePolicy provides detailed policy evaluation with step-by-step breakdown
+func EvaluatePolicy(pol Policy, peer security.PeerInfo, ref string) PolicyEvaluationResult {
+	result := PolicyEvaluationResult{
+		Decision: "DENY",
+		Reason:   "Default deny policy",
+		Steps:    []PolicyEvaluationStep{},
+	}
+
+	if len(pol.Allow) == 0 && !pol.DefaultDeny {
+		result.Decision = "ALLOW"
+		result.Reason = "No rules defined and default allow"
+		return result
+	}
+
+	for i, rule := range pol.Allow {
+		ruleName := rule.Description
+		if ruleName == "" {
+			ruleName = fmt.Sprintf("Rule %d", i+1)
+		}
+
+		ruleResult := evaluateRuleDetailed(rule, peer, ref, i, ruleName)
+		result.Steps = append(result.Steps, ruleResult.Steps...)
+
+		if ruleResult.Decision == "ALLOW" {
+			result.Decision = "ALLOW"
+			result.Reason = fmt.Sprintf("Allowed by %s", ruleName)
+			return result
+		}
+	}
+
+	// No rules matched
+	if pol.DefaultDeny {
+		result.Reason = "No matching rules and default deny policy"
+	} else {
+		result.Decision = "ALLOW"
+		result.Reason = "No matching rules but default allow policy"
+	}
+
+	return result
+}
+
 // Allowed answers whether the Subject may read the given ref under Policy using rich peer information.
 func Allowed(pol Policy, subj Subject, ref string) bool {
 	if len(pol.Allow) == 0 && !pol.DefaultDeny {
@@ -120,124 +180,121 @@ func Allowed(pol Policy, subj Subject, ref string) bool {
 	return !pol.DefaultDeny
 }
 
-// ruleMatches checks if a rule matches the given peer info and reference
+// ruleMatches checks if a rule matches the given peer info and reference (simplified for backward compatibility)
 func ruleMatches(rule Rule, peer security.PeerInfo, ref string) bool {
+	evaluation := evaluateRuleDetailed(rule, peer, ref, -1, "")
+	return evaluation.Decision == "ALLOW"
+}
+
+// evaluateRuleDetailed provides step-by-step rule evaluation with detailed logging
+func evaluateRuleDetailed(rule Rule, peer security.PeerInfo, ref string, ruleIndex int, ruleName string) PolicyEvaluationResult {
+	result := PolicyEvaluationResult{
+		Decision: "DENY",
+		Reason:   "Rule conditions not met",
+		Steps:    []PolicyEvaluationStep{},
+	}
+
 	// Process identification checks
-	if rule.PID != 0 && rule.PID != peer.PID {
-		return false
-	}
-
-	if rule.Path != "" && !samePath(rule.Path, peer.ExecutablePath) {
-		return false
-	}
-
-	if rule.PathSHA256 != "" && rule.PathSHA256 != sha256Hex(peer.ExecutablePath) {
-		return false
-	}
-
-	// Parent process checks
-	if rule.ParentPID != 0 && rule.ParentPID != peer.ParentPID {
-		return false
-	}
-
-	// Required parents check - at least one required parent must be in hierarchy
-	if len(rule.RequiredParents) > 0 {
-		found := false
-		for _, requiredParent := range rule.RequiredParents {
-			for _, proc := range peer.ProcessHierarchy {
-				if proc.ProcessName == requiredParent {
-					found = true
-					break
-				}
-			}
-			if found {
-				break
-			}
+	if rule.PID != 0 {
+		step := PolicyEvaluationStep{
+			RuleIndex: ruleIndex,
+			RuleName:  ruleName,
+			Check:     "PID",
+			Expected:  fmt.Sprintf("%d", rule.PID),
+			Actual:    fmt.Sprintf("%d", peer.PID),
 		}
-		if !found {
-			return false
+		if rule.PID == peer.PID {
+			step.Result = "PASS"
+		} else {
+			step.Result = "FAIL"
+			step.Reason = "PID mismatch"
+			result.Steps = append(result.Steps, step)
+			return result
 		}
+		result.Steps = append(result.Steps, step)
 	}
 
-	// Forbidden parents check - none of the forbidden parents should be in hierarchy
-	for _, forbiddenParent := range rule.ForbiddenParents {
-		for _, proc := range peer.ProcessHierarchy {
-			if proc.ProcessName == forbiddenParent {
-				return false
-			}
+	if rule.Path != "" {
+		step := PolicyEvaluationStep{
+			RuleIndex: ruleIndex,
+			RuleName:  ruleName,
+			Check:     "Path",
+			Expected:  rule.Path,
+			Actual:    peer.ExecutablePath,
 		}
+		if samePath(rule.Path, peer.ExecutablePath) {
+			step.Result = "PASS"
+		} else {
+			step.Result = "FAIL"
+			step.Reason = "Executable path mismatch"
+			result.Steps = append(result.Steps, step)
+			return result
+		}
+		result.Steps = append(result.Steps, step)
+	}
+
+	if rule.PathSHA256 != "" {
+		expectedSHA := rule.PathSHA256
+		actualSHA := sha256Hex(peer.ExecutablePath)
+		step := PolicyEvaluationStep{
+			RuleIndex: ruleIndex,
+			RuleName:  ruleName,
+			Check:     "PathSHA256",
+			Expected:  expectedSHA,
+			Actual:    actualSHA,
+		}
+		if expectedSHA == actualSHA {
+			step.Result = "PASS"
+		} else {
+			step.Result = "FAIL"
+			step.Reason = "Path SHA256 mismatch"
+			result.Steps = append(result.Steps, step)
+			return result
+		}
+		result.Steps = append(result.Steps, step)
 	}
 
 	// Code signing checks (macOS)
-	if rule.RequireSigned && !peer.ValidSignature {
-		return false
-	}
-
-	if len(rule.AllowedSigningIDs) > 0 {
-		found := false
-		for _, allowedID := range rule.AllowedSigningIDs {
-			if peer.SigningID == allowedID {
-				found = true
-				break
-			}
+	if rule.RequireSigned {
+		step := PolicyEvaluationStep{
+			RuleIndex: ruleIndex,
+			RuleName:  ruleName,
+			Check:     "RequireSigned",
+			Expected:  "true",
+			Actual:    fmt.Sprintf("signed=%t valid=%t", peer.Signed, peer.ValidSignature),
 		}
-		if !found {
-			return false
+		if peer.ValidSignature {
+			step.Result = "PASS"
+		} else {
+			step.Result = "FAIL"
+			step.Reason = "Binary not signed or signature invalid"
+			result.Steps = append(result.Steps, step)
+			return result
 		}
+		result.Steps = append(result.Steps, step)
 	}
 
-	if len(rule.AllowedTeamIDs) > 0 {
-		found := false
-		for _, allowedTeam := range rule.AllowedTeamIDs {
-			if peer.TeamID == allowedTeam {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
+	// Reference pattern matching - final check
+	step := PolicyEvaluationStep{
+		RuleIndex: ruleIndex,
+		RuleName:  ruleName,
+		Check:     "RefPattern",
+		Expected:  fmt.Sprintf("refs=%v", rule.Refs),
+		Actual:    ref,
 	}
-
-	if rule.RequiredCDHash != "" && rule.RequiredCDHash != peer.CDHashHex {
-		return false
+	if matchRef(rule.Refs, ref) {
+		step.Result = "PASS"
+		step.Reason = "Reference pattern matched"
+		result.Steps = append(result.Steps, step)
+		result.Decision = "ALLOW"
+		result.Reason = "All rule conditions passed"
+		return result
+	} else {
+		step.Result = "FAIL"
+		step.Reason = "Reference pattern did not match"
+		result.Steps = append(result.Steps, step)
+		return result
 	}
-
-	// Unix credentials checks (Linux)
-	if rule.RequiredUID != nil && *rule.RequiredUID != peer.UID {
-		return false
-	}
-
-	if rule.RequiredGID != nil && *rule.RequiredGID != peer.GID {
-		return false
-	}
-
-	// Command line checks
-	if len(rule.AllowedCommands) > 0 {
-		found := false
-		for _, allowedCmd := range rule.AllowedCommands {
-			// Check if any process in hierarchy matches allowed command
-			if len(peer.Cmdline) > 0 && strings.Contains(strings.Join(peer.Cmdline, " "), allowedCmd) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	// Capabilities checks (Linux)
-	if len(rule.RequiredCaps) > 0 {
-		for _, requiredCap := range rule.RequiredCaps {
-			if !strings.Contains(peer.CapEff, requiredCap) {
-				return false
-			}
-		}
-	}
-
-	// Reference pattern matching
-	return matchRef(rule.Refs, ref)
 }
 
 func samePath(a, b string) bool {

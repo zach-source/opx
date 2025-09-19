@@ -47,17 +47,14 @@ brew services start opx
 opx-authd --enable-audit-log --verbose
 ```
 
-### Nix (Declarative Installation)
+### Nix (Declarative Installation) - *In Development*
 
 ```bash
-# Install directly to profile
-nix profile install github:zach-source/nix-packages#opx
+# Nix packages are being developed - coming soon!
+# Repository: github:zach-source/nix-packages
 
-# Or run without installing
-nix run github:zach-source/nix-packages#opx
-
-# Enter development environment
-nix develop github:zach-source/nix-packages
+# Development environment available
+nix-shell -p go darwin.apple_sdk.frameworks.Security
 ```
 
 **Home Manager Integration (Recommended):**
