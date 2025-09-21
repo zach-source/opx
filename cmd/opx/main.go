@@ -448,7 +448,45 @@ func handleVersionCommand() {
 
 	fmt.Printf("opx-authd server: connected\n")
 	fmt.Printf("  status: ok\n")
+
+	// Try to get the server process command line
+	serverPath, serverCmd := getServerProcessInfo()
+	if serverPath != "" {
+		fmt.Printf("  executable: %s\n", serverPath)
+	}
+	if serverCmd != "" {
+		fmt.Printf("  command: %s\n", serverCmd)
+	}
+
 	fmt.Printf("  note: use 'opx status' for detailed daemon information\n")
+}
+
+// getServerProcessInfo tries to find the running opx-authd process and get its command line
+func getServerProcessInfo() (string, string) {
+	// Use ps to find opx-authd processes
+	cmd := exec.Command("ps", "aux")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "opx-authd") && !strings.Contains(line, "grep") && !strings.Contains(line, "OPX_AUTHD_PATH") {
+			fields := strings.Fields(line)
+			if len(fields) >= 11 {
+				// Extract command line (everything from field 10 onwards in ps aux)
+				cmdline := strings.Join(fields[10:], " ")
+
+				// Only return if this looks like the actual daemon process (not shell wrapper)
+				if strings.HasSuffix(fields[10], "opx-authd") {
+					return fields[10], cmdline
+				}
+			}
+		}
+	}
+
+	return "", ""
 }
 
 func handleAuditFailuresCommand(args []string) {
