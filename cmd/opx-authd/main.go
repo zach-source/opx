@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -19,6 +20,13 @@ import (
 	"github.com/zach-source/opx/internal/session"
 )
 
+// Version information (set via ldflags during build)
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
 	var ttlSec int
 	var sock string
@@ -29,6 +37,7 @@ func main() {
 	var lockOnAuthFailure bool
 	var enableAuditLog bool
 	var auditLogRetentionDays int
+	var showVersion bool
 
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
@@ -39,7 +48,19 @@ func main() {
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
+	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("opx-authd version: %s\n", version)
+		if commit != "unknown" {
+			fmt.Printf("  commit: %s\n", commit)
+		}
+		if date != "unknown" {
+			fmt.Printf("  built: %s\n", date)
+		}
+		os.Exit(0)
+	}
 
 	// Load session configuration from environment/file, then override with flags
 	sessionConfig, err := session.LoadConfig()

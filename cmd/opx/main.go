@@ -20,6 +20,13 @@ import (
 	"github.com/zach-source/opx/internal/util"
 )
 
+// Version information (set via ldflags during build)
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `opx - client for opx-authd
 
@@ -28,6 +35,7 @@ Usage:
   opx [--account=ACCOUNT] resolve NAME=REF [NAME=REF ...]
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
   opx status
+  opx version
   opx audit [--since=24h|2d|1w] [--interactive]
   opx audit failures [--since=24h] [--process=PATH] [--reference=REF]
   opx verify-audit [--file=path] [--since=7d|1w|1M] [--all]
@@ -42,6 +50,7 @@ Commands:
   resolve              # Resolve environment variables  
   run                  # Run command with resolved env vars
   status               # Check daemon status
+  version              # Show client and server version information
   audit                # Manage access control policies
   verify-audit         # Verify audit log integrity
   policy               # Advanced policy management (list, add, remove, test)
@@ -134,6 +143,9 @@ func main() {
 		return
 	case "verify-audit":
 		handleVerifyAuditCommand(cmdArgs)
+		return
+	case "version":
+		handleVersionCommand()
 		return
 	case "policy":
 		handlePolicyCommand(cmdArgs)
@@ -404,6 +416,39 @@ func parseSelection(input string) []int {
 	}
 
 	return indices
+}
+
+func handleVersionCommand() {
+	fmt.Printf("opx client version: %s\n", version)
+	if commit != "unknown" {
+		fmt.Printf("  commit: %s\n", commit)
+	}
+	if date != "unknown" {
+		fmt.Printf("  built: %s\n", date)
+	}
+
+	// Try to get server info from daemon
+	ctx := context.Background()
+	cli, err := client.New()
+	if err != nil {
+		fmt.Printf("opx-authd server: unavailable (%v)\n", err)
+		return
+	}
+
+	if err := cli.EnsureReady(ctx); err != nil {
+		fmt.Printf("opx-authd server: unavailable (%v)\n", err)
+		return
+	}
+
+	// Test connection with ping
+	if err := cli.Ping(ctx); err != nil {
+		fmt.Printf("opx-authd server: error connecting (%v)\n", err)
+		return
+	}
+
+	fmt.Printf("opx-authd server: connected\n")
+	fmt.Printf("  status: ok\n")
+	fmt.Printf("  note: use 'opx status' for detailed daemon information\n")
 }
 
 func handleAuditFailuresCommand(args []string) {
@@ -956,10 +1001,13 @@ func handlePolicyTest(args []string) {
 	processPath := args[0]
 	reference := args[1]
 
-	// Create mock peer info for testing
+	// Create mock peer info for testing (with signing info for accurate testing)
 	peer := security.PeerInfo{
 		PID:            999999, // Mock PID
 		ExecutablePath: processPath,
+		Signed:         true,   // Assume signed for testing
+		ValidSignature: true,   // Assume valid for testing
+		SigningID:      "test", // Mock signing ID
 	}
 
 	pm, err := policy.NewPolicyManager()
