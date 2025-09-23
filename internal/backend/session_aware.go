@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/zach-source/opx/internal/session"
 )
@@ -34,6 +35,9 @@ func (s *SessionAwareBackend) ReadRef(ctx context.Context, ref string) (string, 
 
 // ReadRefWithFlags reads a secret reference with flags and session validation
 func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
+	// Extract account ID from flags for future multi-account session management
+	_ = extractAccountFromFlags(flags) // TODO: Use for per-account session validation
+
 	// Validate session state before attempting to read secrets
 	if err := s.session.ValidateSession(ctx); err != nil {
 		return "", fmt.Errorf("session validation failed: %w", err)
@@ -49,6 +53,16 @@ func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, 
 	s.session.UpdateActivity()
 
 	return value, nil
+}
+
+// extractAccountFromFlags extracts the account ID from command flags
+func extractAccountFromFlags(flags []string) string {
+	for _, flag := range flags {
+		if strings.HasPrefix(flag, "--account=") {
+			return strings.TrimPrefix(flag, "--account=")
+		}
+	}
+	return "" // No account specified
 }
 
 // ValidateCurrentSession validates daemon access session (not 1Password sessions)
