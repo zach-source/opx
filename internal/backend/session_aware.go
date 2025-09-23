@@ -11,8 +11,9 @@ import (
 
 // SessionAwareBackend wraps another backend and adds session validation
 type SessionAwareBackend struct {
-	backend Backend
-	session *session.Manager
+	backend             Backend
+	session             *session.Manager
+	multiAccountSession *session.MultiAccountManager
 }
 
 // NewSessionAwareBackend creates a new session-aware backend wrapper
@@ -20,6 +21,14 @@ func NewSessionAwareBackend(backend Backend, sessionManager *session.Manager) *S
 	return &SessionAwareBackend{
 		backend: backend,
 		session: sessionManager,
+	}
+}
+
+// NewMultiAccountSessionAwareBackend creates a backend with multi-account session support
+func NewMultiAccountSessionAwareBackend(backend Backend, multiAccountSession *session.MultiAccountManager) *SessionAwareBackend {
+	return &SessionAwareBackend{
+		backend:             backend,
+		multiAccountSession: multiAccountSession,
 	}
 }
 
@@ -35,12 +44,19 @@ func (s *SessionAwareBackend) ReadRef(ctx context.Context, ref string) (string, 
 
 // ReadRefWithFlags reads a secret reference with flags and session validation
 func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
-	// Extract account ID from flags for future multi-account session management
-	_ = extractAccountFromFlags(flags) // TODO: Use for per-account session validation
+	// Extract account ID from flags for multi-account session management
+	accountID := extractAccountFromFlags(flags)
 
-	// Validate session state before attempting to read secrets
-	if err := s.session.ValidateSession(ctx); err != nil {
-		return "", fmt.Errorf("session validation failed: %w", err)
+	// Use multi-account session validation if available
+	if s.multiAccountSession != nil && accountID != "" {
+		if err := s.multiAccountSession.ValidateAccountSession(ctx, accountID); err != nil {
+			return "", fmt.Errorf("account session validation failed: %w", err)
+		}
+	} else if s.session != nil {
+		// Fall back to global session validation
+		if err := s.session.ValidateSession(ctx); err != nil {
+			return "", fmt.Errorf("session validation failed: %w", err)
+		}
 	}
 
 	// Perform the actual read operation
@@ -50,7 +66,11 @@ func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, 
 	}
 
 	// Update activity timestamp on successful operation
-	s.session.UpdateActivity()
+	if s.multiAccountSession != nil && accountID != "" {
+		s.multiAccountSession.UpdateAccountActivity(accountID)
+	} else if s.session != nil {
+		s.session.UpdateActivity()
+	}
 
 	return value, nil
 }

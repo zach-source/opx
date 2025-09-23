@@ -83,17 +83,30 @@ func main() {
 		}
 	}
 
+	// Create multi-account session manager
+	var multiAccountSession *session.MultiAccountManager
+	if enableSessionLock {
+		multiAccountSession = session.NewMultiAccountManager(sessionConfig)
+		if verbose {
+			multiAccountSession.SetVerbose(true)
+		}
+	}
+
 	// Create backend (potentially session-aware)
 	var be backend.Backend
 	switch backendName {
 	case "opcli":
-		if sessionManager != nil {
+		if multiAccountSession != nil {
+			be = backend.NewMultiAccountSessionAwareBackend(backend.OpCLI{}, multiAccountSession)
+		} else if sessionManager != nil {
 			be = backend.NewSessionAwareOpCLI(sessionManager)
 		} else {
 			be = backend.OpCLI{}
 		}
 	case "fake":
-		if sessionManager != nil {
+		if multiAccountSession != nil {
+			be = backend.NewMultiAccountSessionAwareBackend(backend.Fake{}, multiAccountSession)
+		} else if sessionManager != nil {
 			be = backend.NewSessionAwareFake(sessionManager)
 		} else {
 			be = backend.Fake{}
@@ -114,7 +127,13 @@ func main() {
 		be = backend.NewBao(baoConfig)
 	case "multi":
 		// Create multi-backend with all backends available
-		opBe := backend.OpCLI{}
+		var opBe backend.Backend = backend.OpCLI{}
+		if multiAccountSession != nil {
+			opBe = backend.NewMultiAccountSessionAwareBackend(backend.OpCLI{}, multiAccountSession)
+		} else if sessionManager != nil {
+			opBe = backend.NewSessionAwareOpCLI(sessionManager)
+		}
+
 		vaultBe := backend.NewVault(backend.VaultConfig{
 			Address:    "http://localhost:8200",
 			AuthMethod: "token",
@@ -160,15 +179,6 @@ func main() {
 
 	if enableAuditLog && verbose {
 		log.Printf("Audit logging enabled")
-	}
-
-	// Create multi-account session manager
-	var multiAccountSession *session.MultiAccountManager
-	if enableSessionLock {
-		multiAccountSession = session.NewMultiAccountManager(sessionConfig)
-		if verbose {
-			multiAccountSession.SetVerbose(true)
-		}
 	}
 
 	// Create rate limiter: 10 requests per second with burst of 5
