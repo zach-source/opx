@@ -162,19 +162,29 @@ func main() {
 		log.Printf("Audit logging enabled")
 	}
 
+	// Create multi-account session manager
+	var multiAccountSession *session.MultiAccountManager
+	if enableSessionLock {
+		multiAccountSession = session.NewMultiAccountManager(sessionConfig)
+		if verbose {
+			multiAccountSession.SetVerbose(true)
+		}
+	}
+
 	// Create rate limiter: 10 requests per second with burst of 5
 	rateLimiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 5)
 
 	srv := &server.Server{
-		SockPath:    sock,
-		Backend:     be,
-		Cache:       cache.New(time.Duration(ttlSec) * time.Second),
-		Session:     sessionManager,
-		Policy:      accessPolicy,
-		PolicyPath:  policyPath,
-		AuditLogger: auditLogger,
-		RateLimiter: rateLimiter,
-		Verbose:     verbose,
+		SockPath:            sock,
+		Backend:             be,
+		Cache:               cache.New(time.Duration(ttlSec) * time.Second),
+		Session:             sessionManager,
+		MultiAccountSession: multiAccountSession,
+		Policy:              accessPolicy,
+		PolicyPath:          policyPath,
+		AuditLogger:         auditLogger,
+		RateLimiter:         rateLimiter,
+		Verbose:             verbose,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

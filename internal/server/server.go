@@ -94,16 +94,17 @@ func (c *PeerAwareConn) GetPeerInfo() *security.PeerInfo {
 }
 
 type Server struct {
-	SockPath    string
-	Token       string
-	Cache       *cache.Cache
-	Backend     backend.Backend
-	Session     *session.Manager
-	Policy      policy.Policy
-	PolicyPath  string
-	AuditLogger *audit.Logger
-	RateLimiter *rate.Limiter
-	Verbose     bool
+	SockPath            string
+	Token               string
+	Cache               *cache.Cache
+	Backend             backend.Backend
+	Session             *session.Manager
+	MultiAccountSession *session.MultiAccountManager
+	Policy              policy.Policy
+	PolicyPath          string
+	AuditLogger         *audit.Logger
+	RateLimiter         *rate.Limiter
+	Verbose             bool
 
 	sf singleflight.Group
 	mu sync.Mutex
@@ -172,6 +173,12 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.setupSessionLockCallback()
 		s.Session.Start(ctx)
 		defer s.Session.Stop()
+	}
+
+	// Multi-account session management
+	if s.MultiAccountSession != nil {
+		s.MultiAccountSession.Start(ctx)
+		defer s.MultiAccountSession.Stop()
 	}
 
 	go func() {
