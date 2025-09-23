@@ -413,7 +413,8 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		if s.Verbose {
 			log.Printf("read error for ref %q: %v", ref, err)
 		}
-		http.Error(w, "failed to read secret", http.StatusBadGateway)
+		// Return the actual error message instead of generic "failed to read secret"
+		http.Error(w, fmt.Sprintf("failed to read secret: %v", err), http.StatusBadGateway)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(rr)
@@ -436,8 +437,8 @@ func (s *Server) handleReads(w http.ResponseWriter, r *http.Request) {
 			if s.Verbose {
 				log.Printf("batch read error for ref %q: %v", ref, err)
 			}
-			// record the error in Value to return something; caller decides
-			result[ref] = protocol.ReadResponse{Ref: ref, Value: "ERROR: failed to read secret", FromCache: false, ExpiresIn: 0, ResolvedAt: time.Now().Unix()}
+			// record the detailed error in Value to return something; caller decides
+			result[ref] = protocol.ReadResponse{Ref: ref, Value: fmt.Sprintf("ERROR: %v", err), FromCache: false, ExpiresIn: 0, ResolvedAt: time.Now().Unix()}
 			continue
 		}
 		result[ref] = rr
@@ -458,7 +459,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 			if s.Verbose {
 				log.Printf("resolve error for %s (ref %q): %v", name, ref, err)
 			}
-			http.Error(w, fmt.Sprintf("resolve %s: failed to read secret", name), http.StatusBadGateway)
+			http.Error(w, fmt.Sprintf("resolve %s: %v", name, err), http.StatusBadGateway)
 			return
 		}
 		out[name] = rr.Value
