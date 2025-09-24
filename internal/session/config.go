@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -49,6 +50,30 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Override with environment variables
+	config.loadFromEnv()
+
+	// Validate the configuration
+	if err := config.validate(); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+// LoadConfigFromFile loads configuration from a specific file path
+func LoadConfigFromFile(filePath string) (*Config, error) {
+	config := DefaultConfig()
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	if err := json.Unmarshal(data, config); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Still apply environment variable overrides
 	config.loadFromEnv()
 
 	// Validate the configuration

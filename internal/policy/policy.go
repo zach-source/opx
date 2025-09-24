@@ -81,6 +81,21 @@ func Load() (Policy, string, error) {
 	return pol, p, nil
 }
 
+// LoadFromFile loads policy from a specific file path
+func LoadFromFile(filePath string) (Policy, error) {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return Policy{}, fmt.Errorf("failed to read policy file: %w", err)
+	}
+
+	var pol Policy
+	if err := json.Unmarshal(b, &pol); err != nil {
+		return Policy{}, fmt.Errorf("failed to parse policy file: %w", err)
+	}
+
+	return pol, nil
+}
+
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])

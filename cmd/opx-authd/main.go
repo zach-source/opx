@@ -38,6 +38,8 @@ func main() {
 	var enableAuditLog bool
 	var auditLogRetentionDays int
 	var showVersion bool
+	var configFile string
+	var policyFile string
 
 	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
@@ -49,6 +51,8 @@ func main() {
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
+	flag.StringVar(&configFile, "config", "", "path to configuration file (overrides default locations)")
+	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
 	flag.Parse()
 
 	if showVersion {
@@ -62,11 +66,23 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Load session configuration from environment/file, then override with flags
-	sessionConfig, err := session.LoadConfig()
-	if err != nil {
-		log.Printf("Warning: failed to load session config: %v, using defaults", err)
-		sessionConfig = session.DefaultConfig()
+	// Load session configuration from custom file or default locations
+	var sessionConfig *session.Config
+	var err error
+	if configFile != "" {
+		sessionConfig, err = session.LoadConfigFromFile(configFile)
+		if err != nil {
+			log.Fatalf("Failed to load config from %s: %v", configFile, err)
+		}
+		if verbose {
+			log.Printf("Loaded session config from %s", configFile)
+		}
+	} else {
+		sessionConfig, err = session.LoadConfig()
+		if err != nil {
+			log.Printf("Warning: failed to load session config: %v, using defaults", err)
+			sessionConfig = session.DefaultConfig()
+		}
 	}
 
 	// Override config with command-line flags
@@ -147,13 +163,26 @@ func main() {
 		log.Fatalf("unknown backend: %s", backendName)
 	}
 
-	// Load access policy
-	accessPolicy, policyPath, err := policy.Load()
-	if err != nil {
-		log.Printf("Warning: failed to load access policy from %s: %v, using defaults", policyPath, err)
-		accessPolicy = policy.Policy{Allow: []policy.Rule{}, DefaultDeny: false}
-	} else if verbose {
-		log.Printf("Loaded access policy from %s", policyPath)
+	// Load access policy from custom file or default location
+	var accessPolicy policy.Policy
+	var policyPath string
+	if policyFile != "" {
+		accessPolicy, err = policy.LoadFromFile(policyFile)
+		if err != nil {
+			log.Fatalf("Failed to load policy from %s: %v", policyFile, err)
+		}
+		policyPath = policyFile
+		if verbose {
+			log.Printf("Loaded access policy from %s", policyFile)
+		}
+	} else {
+		accessPolicy, policyPath, err = policy.Load()
+		if err != nil {
+			log.Printf("Warning: failed to load access policy from %s: %v, using defaults", policyPath, err)
+			accessPolicy = policy.Policy{Allow: []policy.Rule{}, DefaultDeny: false}
+		} else if verbose {
+			log.Printf("Loaded access policy from %s", policyPath)
+		}
 	}
 
 	// Create audit logger with rotation configuration

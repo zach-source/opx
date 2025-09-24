@@ -1,0 +1,6 @@
+{
+  "session_idle_timeout": 28800000000000,
+  "enable_session_lock": true,
+  "lock_on_auth_failure": true,
+  "check_interval": 60000000000
+}

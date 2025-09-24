@@ -1,0 +1,31 @@
+{
+  "allow": [
+    {
+      "path": "/nix/store/81jyp1hsx8yahbm3a7dfm50d93kppfc9-opx-0.3.0/bin/opx",
+      "refs": [
+        "op://Private/*",
+        "op://Shared/*", 
+        "op://Employee/*",
+        "op://Preview/*",
+        "op://Development/*",
+        "op://Production/*"
+      ],
+      "require_signed": true,
+      "description": "Nix opx binary with all vault access"
+    },
+    {
+      "path": "/Users/ztaylor/repos/workspaces/op-authd-proto/bin/opx",
+      "refs": [
+        "op://Private/*",
+        "op://Shared/*",
+        "op://Employee/*", 
+        "op://Preview/*",
+        "op://Development/*",
+        "op://Production/*"
+      ],
+      "require_signed": true,
+      "description": "Local development opx binary with all vault access"
+    }
+  ],
+  "default_deny": true
+}
