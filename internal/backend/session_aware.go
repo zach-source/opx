@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"strings"
 
 	"github.com/zach-source/opx/internal/session"
 )
@@ -75,15 +74,7 @@ func (s *SessionAwareBackend) ReadRefWithFlags(ctx context.Context, ref string, 
 	return value, nil
 }
 
-// extractAccountFromFlags extracts the account ID from command flags
-func extractAccountFromFlags(flags []string) string {
-	for _, flag := range flags {
-		if strings.HasPrefix(flag, "--account=") {
-			return strings.TrimPrefix(flag, "--account=")
-		}
-	}
-	return "" // No account specified
-}
+// extractAccountFromFlags is defined in opcli.go
 
 // ValidateCurrentSession validates daemon access session (not 1Password sessions)
 // This is used as the unlock callback for session validation
