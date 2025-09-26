@@ -27,6 +27,64 @@ var (
 	date    = "unknown"
 )
 
+type parsedArgs struct {
+	command string
+	args    []string
+	opFlags []string
+}
+
+func parseArgs(args []string) parsedArgs {
+	var result parsedArgs
+
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+
+		if strings.HasPrefix(arg, "--account=") {
+			account := strings.TrimPrefix(arg, "--account=")
+			if account != "" {
+				result.opFlags = append(result.opFlags, "--account="+account)
+			}
+			i++
+		} else if arg == "--account" && i+1 < len(args) {
+			account := args[i+1]
+			if account != "" {
+				result.opFlags = append(result.opFlags, "--account="+account)
+			}
+			i += 2
+		} else if !strings.HasPrefix(arg, "--") {
+			result.command = arg
+			i++
+			break
+		} else {
+			i++
+		}
+	}
+
+	for i < len(args) {
+		arg := args[i]
+
+		if strings.HasPrefix(arg, "--account=") {
+			account := strings.TrimPrefix(arg, "--account=")
+			if account != "" {
+				result.opFlags = append(result.opFlags, "--account="+account)
+			}
+			i++
+		} else if arg == "--account" && i+1 < len(args) {
+			account := args[i+1]
+			if account != "" {
+				result.opFlags = append(result.opFlags, "--account="+account)
+			}
+			i += 2
+		} else {
+			result.args = append(result.args, arg)
+			i++
+		}
+	}
+
+	return result
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `opx - client for opx-authd
 
@@ -76,49 +134,15 @@ Examples:
 }
 
 func main() {
-	// Parse global flags
-	var account string
-	var opFlags []string
+	parsed := parseArgs(os.Args[1:])
 
-	// Find the subcommand position (first non-flag argument)
-	cmdPos := -1
-	for i, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "--account=") {
-			account = strings.TrimPrefix(arg, "--account=")
-			if account != "" {
-				opFlags = append(opFlags, "--account="+account)
-			}
-		} else if arg == "--account" && i+1 < len(os.Args[1:]) {
-			account = os.Args[i+2] // i is 0-based from os.Args[1:], so i+2 for full args
-			if account != "" {
-				opFlags = append(opFlags, "--account="+account)
-			}
-			i++ // skip the next argument
-		} else if !strings.HasPrefix(arg, "--") {
-			cmdPos = i + 1 // +1 because we're iterating over os.Args[1:]
-			break
-		}
-	}
-
-	if cmdPos == -1 || cmdPos >= len(os.Args) {
+	if parsed.command == "" {
 		usage()
 	}
 
-	cmd := os.Args[cmdPos]
-
-	// Extract command arguments (non-flag arguments after the command)
-	var cmdArgs []string
-	for i := cmdPos + 1; i < len(os.Args); i++ {
-		arg := os.Args[i]
-		// Skip --account flags as they've already been processed
-		if strings.HasPrefix(arg, "--account") {
-			if arg == "--account" && i+1 < len(os.Args) {
-				i++ // Skip the next argument too
-			}
-			continue
-		}
-		cmdArgs = append(cmdArgs, arg)
-	}
+	cmd := parsed.command
+	cmdArgs := parsed.args
+	opFlags := parsed.opFlags
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

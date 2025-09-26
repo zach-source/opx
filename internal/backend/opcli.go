@@ -64,9 +64,7 @@ func (OpCLI) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (
 	args = append(args, "read", "--no-color", ref)
 
 	cmd := exec.CommandContext(ctx, "op", args...)
-
-	// Set up account context isolation for multi-account support in single daemon
-	cmd.Env = createAccountIsolatedEnv(flags)
+	// Let op CLI handle account resolution naturally - no environment isolation needed
 
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out

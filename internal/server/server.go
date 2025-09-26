@@ -410,6 +410,12 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
+
+	// Debug: log the request details
+	if s.Verbose {
+		log.Printf("[DEBUG] handleRead: ref=%s, flags=%v", req.Ref, req.Flags)
+	}
+
 	ref := strings.TrimSpace(req.Ref)
 	if ref == "" {
 		http.Error(w, "ref required", http.StatusBadRequest)
