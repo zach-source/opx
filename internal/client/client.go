@@ -26,9 +26,14 @@ type Client struct {
 }
 
 func New() (*Client, error) {
-	sock, err := util.SocketPath()
-	if err != nil {
-		return nil, err
+	// Check for custom socket path via environment variable
+	sock := os.Getenv("OPX_SOCKET_PATH")
+	if sock == "" {
+		var err error
+		sock, err = util.SocketPath()
+		if err != nil {
+			return nil, err
+		}
 	}
 	tokPath, err := util.TokenPath()
 	if err != nil {
