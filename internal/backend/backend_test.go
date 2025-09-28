@@ -538,6 +538,100 @@ func TestOpCLI_Integration(t *testing.T) {
 	}
 }
 
+func TestOpx_EndToEndIntegration(t *testing.T) {
+	if os.Getenv("ENABLE_OP_INTEGRATION_TESTS") != "1" {
+		t.Skip("Skipping end-to-end integration test. Set ENABLE_OP_INTEGRATION_TESTS=1 to enable.")
+	}
+
+	if _, err := exec.LookPath("op"); err != nil {
+		t.Skipf("op command not found: %v", err)
+	}
+
+	ctx := context.Background()
+	testValue := "opx-integration-test-value-" + fmt.Sprint(time.Now().Unix())
+	testItemTitle := "opx-integration-test-item-" + fmt.Sprint(time.Now().Unix())
+	accountID := os.Getenv("OP_ACCOUNT_ID")
+	if accountID == "" {
+		t.Skip("OP_ACCOUNT_ID not set, skipping multi-account test")
+	}
+
+	t.Logf("Creating test item with value: %s", testValue)
+	createCmd := exec.CommandContext(ctx, "op", "item", "create",
+		"--category=password",
+		"--title="+testItemTitle,
+		"--vault=Private",
+		"--account="+accountID,
+		"password="+testValue)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		t.Fatalf("Failed to create test item: %v\nOutput: %s", err, string(out))
+	}
+
+	defer func() {
+		t.Logf("Cleaning up test item: %s", testItemTitle)
+		delCmd := exec.Command("op", "item", "delete", testItemTitle, "--vault=Private", "--account="+accountID)
+		_ = delCmd.Run()
+	}()
+
+	socketPath := "/tmp/opx-integration-test-" + fmt.Sprint(time.Now().Unix()) + ".sock"
+	policyPath := "/tmp/opx-integration-policy-" + fmt.Sprint(time.Now().Unix()) + ".json"
+
+	policy := `{"allow":[{"path":"` + os.Args[0] + `","refs":["op://*"],"require_signed":false}],"default_deny":false}`
+	if err := os.WriteFile(policyPath, []byte(policy), 0600); err != nil {
+		t.Fatalf("Failed to create policy file: %v", err)
+	}
+	defer os.Remove(policyPath)
+
+	t.Logf("Starting opx-authd with socket: %s", socketPath)
+	daemonCmd := exec.CommandContext(ctx, "../../bin/opx-authd",
+		"--sock="+socketPath,
+		"--backend=opcli",
+		"--policy="+policyPath)
+	if err := daemonCmd.Start(); err != nil {
+		t.Fatalf("Failed to start daemon: %v", err)
+	}
+	defer func() {
+		_ = daemonCmd.Process.Kill()
+		_ = os.Remove(socketPath)
+	}()
+
+	time.Sleep(2 * time.Second)
+
+	os.Setenv("OPX_SOCKET_PATH", socketPath)
+	os.Setenv("OPX_AUTOSTART", "0")
+	defer func() {
+		os.Unsetenv("OPX_SOCKET_PATH")
+		os.Unsetenv("OPX_AUTOSTART")
+	}()
+
+	refPath := "op://Private/" + testItemTitle + "/password"
+
+	t.Run("flag after command", func(t *testing.T) {
+		readCmd := exec.CommandContext(ctx, "../../bin/opx", "read", refPath, "--account="+accountID)
+		out, err := readCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("opx read failed: %v\nOutput: %s", err, string(out))
+		}
+		result := strings.TrimSpace(string(out))
+		if result != testValue {
+			t.Errorf("Expected %q, got %q", testValue, result)
+		}
+	})
+
+	t.Run("flag before command", func(t *testing.T) {
+		readCmd := exec.CommandContext(ctx, "../../bin/opx", "--account="+accountID, "read", refPath)
+		out, err := readCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("opx read failed: %v\nOutput: %s", err, string(out))
+		}
+		result := strings.TrimSpace(string(out))
+		if result != testValue {
+			t.Errorf("Expected %q, got %q", testValue, result)
+		}
+	})
+
+	t.Logf("✅ End-to-end integration test passed")
+}
+
 // TestOpCLI_ValidationSecurity tests the new security validations
 func TestOpCLI_ValidationSecurity(t *testing.T) {
 	opcli := &OpCLI{}
