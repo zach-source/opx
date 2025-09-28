@@ -70,7 +70,10 @@ func (mam *MultiAccountManager) SetVerbose(verbose bool) {
 func (mam *MultiAccountManager) GetAccountSession(accountID string) *AccountSession {
 	mam.mu.RLock()
 	defer mam.mu.RUnlock()
+	return mam.getAccountSessionLocked(accountID)
+}
 
+func (mam *MultiAccountManager) getAccountSessionLocked(accountID string) *AccountSession {
 	session, exists := mam.sessions[accountID]
 	if !exists {
 		// Create new session for this account
@@ -91,7 +94,7 @@ func (mam *MultiAccountManager) ValidateAccountSession(ctx context.Context, acco
 	mam.mu.Lock()
 	defer mam.mu.Unlock()
 
-	session := mam.GetAccountSession(accountID)
+	session := mam.getAccountSessionLocked(accountID)
 
 	// Check if session is locked or expired
 	if session.State == SessionLocked || session.State == SessionExpired {
@@ -121,7 +124,7 @@ func (mam *MultiAccountManager) UpdateAccountActivity(accountID string) {
 	mam.mu.Lock()
 	defer mam.mu.Unlock()
 
-	session := mam.GetAccountSession(accountID)
+	session := mam.getAccountSessionLocked(accountID)
 	session.LastActivity = time.Now()
 	session.State = SessionAuthenticated
 }
@@ -131,7 +134,7 @@ func (mam *MultiAccountManager) LockAccountSession(accountID string) error {
 	mam.mu.Lock()
 	defer mam.mu.Unlock()
 
-	session := mam.GetAccountSession(accountID)
+	session := mam.getAccountSessionLocked(accountID)
 	session.State = SessionLocked
 
 	if mam.lockCallback != nil {
