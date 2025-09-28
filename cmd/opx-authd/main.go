@@ -228,6 +228,7 @@ func main() {
 		AuditLogger:         auditLogger,
 		RateLimiter:         rateLimiter,
 		Verbose:             verbose,
+		Version:             version,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -32,14 +32,18 @@ type ResolveResponse struct {
 }
 
 type Status struct {
-	Backend    string         `json:"backend"`
-	CacheSize  int            `json:"cache_size"`
-	Hits       int64          `json:"hits"`
-	Misses     int64          `json:"misses"`
-	InFlight   int            `json:"in_flight"`
-	TTLSeconds int            `json:"ttl_seconds"`
-	SocketPath string         `json:"socket_path"`
-	Session    *SessionStatus `json:"session,omitempty"`
+	Backend         string         `json:"backend"`
+	Version         string         `json:"version"`
+	Uptime          int64          `json:"uptime_seconds"`
+	CacheSize       int            `json:"cache_size"`
+	Hits            int64          `json:"hits"`
+	Misses          int64          `json:"misses"`
+	InFlight        int            `json:"in_flight"`
+	TTLSeconds      int            `json:"ttl_seconds"`
+	SocketPath      string         `json:"socket_path"`
+	PolicyPath      string         `json:"policy_path,omitempty"`
+	PolicyRuleCount int            `json:"policy_rule_count"`
+	Session         *SessionStatus `json:"session,omitempty"`
 }
 
 type SessionStatus struct {

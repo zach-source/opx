@@ -105,12 +105,18 @@ type Server struct {
 	AuditLogger         *audit.Logger
 	RateLimiter         *rate.Limiter
 	Verbose             bool
+	Version             string
+	StartTime           time.Time
 
 	sf singleflight.Group
 	mu sync.Mutex
 }
 
 func (s *Server) Serve(ctx context.Context) error {
+	if s.StartTime.IsZero() {
+		s.StartTime = time.Now()
+	}
+
 	if s.SockPath == "" {
 		p, err := util.SocketPath()
 		if err != nil {
@@ -344,14 +350,26 @@ func (s *Server) rateLimit(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	size, hits, misses, inflight := s.Cache.Stats()
+
+	uptime := int64(0)
+	if !s.StartTime.IsZero() {
+		uptime = int64(time.Since(s.StartTime).Seconds())
+	}
+
+	policyRuleCount := len(s.Policy.Allow)
+
 	resp := protocol.Status{
-		Backend:    s.Backend.Name(),
-		CacheSize:  size,
-		Hits:       hits,
-		Misses:     misses,
-		InFlight:   inflight,
-		TTLSeconds: int(s.CacheTTL().Seconds()),
-		SocketPath: s.SockPath,
+		Backend:         s.Backend.Name(),
+		Version:         s.Version,
+		Uptime:          uptime,
+		CacheSize:       size,
+		Hits:            hits,
+		Misses:          misses,
+		InFlight:        inflight,
+		TTLSeconds:      int(s.CacheTTL().Seconds()),
+		SocketPath:      s.SockPath,
+		PolicyPath:      s.PolicyPath,
+		PolicyRuleCount: policyRuleCount,
 	}
 
 	// Add session information if session manager is available

@@ -85,6 +85,29 @@ func parseArgs(args []string) parsedArgs {
 	return result
 }
 
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		hours := int(d.Hours())
+		minutes := int(d.Minutes()) % 60
+		if minutes == 0 {
+			return fmt.Sprintf("%dh", hours)
+		}
+		return fmt.Sprintf("%dh%dm", hours, minutes)
+	}
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	if hours == 0 {
+		return fmt.Sprintf("%dd", days)
+	}
+	return fmt.Sprintf("%dd%dh", days, hours)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `opx - client for opx-authd
 
@@ -183,11 +206,47 @@ func main() {
 
 	switch cmd {
 	case "status":
-		if err := cli.Ping(ctx); err != nil {
+		status, err := cli.Status(ctx)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "status:", err)
 			os.Exit(1)
 		}
-		fmt.Println("ok")
+
+		fmt.Printf("opx-authd status: running\n")
+		fmt.Printf("  Version:      %s\n", status.Version)
+		fmt.Printf("  Backend:      %s\n", status.Backend)
+		fmt.Printf("  Socket:       %s\n", status.SocketPath)
+		fmt.Printf("  Uptime:       %s\n", formatDuration(time.Duration(status.Uptime)*time.Second))
+		fmt.Printf("\n")
+		fmt.Printf("Cache:\n")
+		fmt.Printf("  Size:         %d items\n", status.CacheSize)
+		fmt.Printf("  TTL:          %ds\n", status.TTLSeconds)
+		fmt.Printf("  Hits:         %d\n", status.Hits)
+		fmt.Printf("  Misses:       %d\n", status.Misses)
+		fmt.Printf("  In-flight:    %d\n", status.InFlight)
+		if status.Hits+status.Misses > 0 {
+			hitRate := float64(status.Hits) / float64(status.Hits+status.Misses) * 100
+			fmt.Printf("  Hit rate:     %.1f%%\n", hitRate)
+		}
+		fmt.Printf("\n")
+		if status.PolicyPath != "" {
+			fmt.Printf("Policy:\n")
+			fmt.Printf("  Path:         %s\n", status.PolicyPath)
+			fmt.Printf("  Rules:        %d\n", status.PolicyRuleCount)
+			fmt.Printf("\n")
+		}
+		if status.Session != nil {
+			fmt.Printf("Session:\n")
+			fmt.Printf("  State:        %s\n", status.Session.State)
+			if status.Session.Enabled {
+				fmt.Printf("  Idle timeout: %s\n", formatDuration(time.Duration(status.Session.IdleTimeout)*time.Second))
+				if status.Session.TimeUntilLock > 0 {
+					fmt.Printf("  Lock in:      %s\n", formatDuration(time.Duration(status.Session.TimeUntilLock)*time.Second))
+				}
+			} else {
+				fmt.Printf("  Idle timeout: disabled\n")
+			}
+		}
 	case "read":
 		if len(cmdArgs) < 1 {
 			usage()

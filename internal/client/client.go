@@ -157,6 +157,14 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) Status(ctx context.Context) (protocol.Status, error) {
+	var status protocol.Status
+	if err := c.doJSON(ctx, "GET", "/v1/status", nil, &status); err != nil {
+		return protocol.Status{}, err
+	}
+	return status, nil
+}
+
 // getDaemonPath returns the configured path to the opx-authd binary
 func getDaemonPath() string {
 	// Check environment variable first
