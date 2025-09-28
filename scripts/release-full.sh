@@ -41,13 +41,17 @@ info "Running tests..."
 go test ./... || error "Tests failed"
 success "Tests passed"
 
+info "Creating git tag ${VERSION}..."
+git tag "${VERSION}"
+success "Git tag created"
+
 info "Cleaning previous build artifacts..."
 make clean || error "Clean failed"
 success "Build artifacts cleaned"
 
-info "Building binaries..."
+info "Building binaries with tag version..."
 make build || error "Build failed"
-success "Binaries built"
+success "Binaries built with version ${VERSION}"
 
 ARCH=$(arch)
 info "Signing binaries for darwin_${ARCH}..."
@@ -72,10 +76,6 @@ cd dist
 shasum -a 256 *.tar.gz > checksums.txt
 cd ..
 success "Archives and checksums created"
-
-info "Creating git tag ${VERSION}..."
-git tag "${VERSION}"
-success "Git tag created"
 
 info "Pushing tag to GitHub..."
 git push origin "${VERSION}"
