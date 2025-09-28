@@ -175,6 +175,99 @@ func TestFake_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestFake_WithFlags(t *testing.T) {
+	fake := &Fake{}
+	ctx := context.Background()
+
+	t.Run("no flags matches base result", func(t *testing.T) {
+		baseResult, _ := fake.ReadRef(ctx, "op://vault/item/field")
+		result, err := fake.ReadRefWithFlags(ctx, "op://vault/item/field", nil)
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if result != baseResult {
+			t.Errorf("Expected same result without flags: %s vs %s", result, baseResult)
+		}
+	})
+
+	t.Run("with account flag differs from base", func(t *testing.T) {
+		baseResult, _ := fake.ReadRef(ctx, "op://vault/item/field")
+		result, err := fake.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if result == baseResult {
+			t.Error("Expected different result with account flag")
+		}
+	})
+
+	t.Run("multiple flags differs from base", func(t *testing.T) {
+		baseResult, _ := fake.ReadRef(ctx, "op://vault/item/field")
+		result, err := fake.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123", "--session=xyz"})
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if result == baseResult {
+			t.Error("Expected different result with multiple flags")
+		}
+		if !strings.HasPrefix(result, "fake_") {
+			t.Errorf("Expected result to start with 'fake_', got: %s", result)
+		}
+	})
+
+	t.Run("same flags produce same result repeatedly", func(t *testing.T) {
+		result1, _ := fake.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+		result2, _ := fake.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+		if result1 != result2 {
+			t.Errorf("Expected same result with identical flags: %s vs %s", result1, result2)
+		}
+	})
+}
+
+func TestFake_AccountFlagExtraction(t *testing.T) {
+	fake := &Fake{}
+	ctx := context.Background()
+
+	ref := "op://vault/item/field"
+
+	result1, _ := fake.ReadRefWithFlags(ctx, ref, []string{"--account=ACC1"})
+	result2, _ := fake.ReadRefWithFlags(ctx, ref, []string{"--account=ACC2"})
+	result3, _ := fake.ReadRefWithFlags(ctx, ref, []string{"--account=ACC1"})
+
+	if result1 == result2 {
+		t.Error("Different account flags should produce different results")
+	}
+
+	if result1 != result3 {
+		t.Error("Same account flag should produce same result")
+	}
+}
+
+func TestMock_WithFlags(t *testing.T) {
+	mock := NewMock("test-backend")
+	ctx := context.Background()
+
+	mock.SetResponse("op://vault/item/field", "secret-value")
+
+	result, err := mock.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result != "secret-value" {
+		t.Errorf("Expected 'secret-value', got %s", result)
+	}
+
+	calls := mock.GetCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Expected 1 call, got %d", len(calls))
+	}
+
+	expectedCall := "op://vault/item/field|flags:--account=ACC123"
+	if calls[0] != expectedCall {
+		t.Errorf("Expected call %q, got %q", expectedCall, calls[0])
+	}
+}
+
 // TestOpCLI tests the OpCLI backend implementation
 func TestOpCLI_Name(t *testing.T) {
 	opcli := &OpCLI{}
@@ -208,33 +301,29 @@ func TestOpCLI_EmptyRef(t *testing.T) {
 
 // TestOpCLI_CommandExecution tests the command execution without actually calling op
 func TestOpCLI_CommandExecution(t *testing.T) {
-	// We can't easily test the actual op command without having it installed
-	// and configured, so we test the error handling and edge cases
 	opcli := &OpCLI{}
 	ctx := context.Background()
 
-	// Test with a ref that has valid format but will fail (op not installed or vault doesn't exist)
 	_, err := opcli.ReadRef(ctx, "op://nonexistent-vault/item/field")
 	if err == nil {
 		t.Error("Expected error when op command fails")
 	}
 
-	// Error should contain our expected format (either validation error or op command error)
 	errStr := err.Error()
-	// Could fail either due to validation (op command not found) or command execution
-	if !strings.Contains(errStr, "op read failed") && !strings.Contains(errStr, "executable file not found") {
-		t.Errorf("Error should contain 'op read failed' or executable not found, got: %v", err)
+	if !strings.Contains(errStr, "not signed in") &&
+		!strings.Contains(errStr, "session validation") &&
+		!strings.Contains(errStr, "op read failed") &&
+		!strings.Contains(errStr, "executable file not found") {
+		t.Errorf("Error should contain session/auth error or command error, got: %v", err)
 	}
 }
 
 func TestOpCLI_ContextTimeout(t *testing.T) {
 	opcli := &OpCLI{}
 
-	// Very short timeout that should trigger before any real op command completes
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
 
-	// Give the context a moment to timeout
 	time.Sleep(1 * time.Millisecond)
 
 	_, err := opcli.ReadRef(ctx, "op://vault/item/field")
@@ -242,9 +331,10 @@ func TestOpCLI_ContextTimeout(t *testing.T) {
 		t.Error("Expected timeout error")
 	}
 
-	// Should be a context deadline exceeded error wrapped in our error format
-	if !strings.Contains(err.Error(), "op read failed") {
-		t.Errorf("Expected wrapped error, got: %v", err)
+	errStr := err.Error()
+	if !strings.Contains(errStr, "session validation timeout") &&
+		!strings.Contains(errStr, "op read failed") {
+		t.Errorf("Expected timeout error, got: %v", err)
 	}
 }
 

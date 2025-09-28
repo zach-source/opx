@@ -50,6 +50,11 @@ func (OpCLI) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (
 		}
 	}
 
+	// Pre-flight check: Verify session is authenticated before attempting read
+	if err := validateSessionWithFlags(ctx, flags); err != nil {
+		return "", err
+	}
+
 	// Build command args: op [global-flags] read --no-color ref
 	args := []string{}
 
@@ -64,13 +69,21 @@ func (OpCLI) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (
 	args = append(args, "read", "--no-color", ref)
 
 	cmd := exec.CommandContext(ctx, "op", args...)
-	// Let op CLI handle account resolution naturally - no environment isolation needed
+	cmd.Stdin = nil
 
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("op read failed: %w; stderr=%s", err, strings.TrimSpace(errb.String()))
+		stderr := strings.TrimSpace(errb.String())
+		if strings.Contains(stderr, "not signed in") || strings.Contains(stderr, "not currently signed in") {
+			accountID := extractAccountFromFlags(flags)
+			if accountID != "" {
+				return "", fmt.Errorf("account %s not signed in. Run: opx login 1password --account=%s", accountID, accountID)
+			}
+			return "", errors.New("not signed in to 1Password. Run: opx login 1password")
+		}
+		return "", fmt.Errorf("op read failed: %w; stderr=%s", err, stderr)
 	}
 	// Trim one trailing newline without nuking legitimate whitespace
 	s := out.String()
@@ -127,4 +140,45 @@ func WithTimeout(parent context.Context, d time.Duration) (context.Context, cont
 		return parent, func() {}
 	}
 	return context.WithTimeout(parent, d)
+}
+
+func validateSessionWithFlags(ctx context.Context, flags []string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	args := []string{}
+	for _, flag := range flags {
+		if flag != "" {
+			args = append(args, flag)
+		}
+	}
+	args = append(args, "whoami")
+
+	cmd := exec.CommandContext(ctx, "op", args...)
+	cmd.Stdin = nil
+	cmd.Cancel = func() error {
+		return cmd.Process.Kill()
+	}
+
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			accountID := extractAccountFromFlags(flags)
+			if accountID != "" {
+				return fmt.Errorf("session validation timeout for account %s. Run: opx login 1password --account=%s", accountID, accountID)
+			}
+			return errors.New("session validation timeout. Run: opx login 1password")
+		}
+		stderr := strings.TrimSpace(errb.String())
+		if strings.Contains(stderr, "not signed in") || strings.Contains(stderr, "not currently signed in") {
+			accountID := extractAccountFromFlags(flags)
+			if accountID != "" {
+				return fmt.Errorf("account %s not signed in. Run: opx login 1password --account=%s", accountID, accountID)
+			}
+			return errors.New("not signed in to 1Password. Run: opx login 1password")
+		}
+		return fmt.Errorf("session validation failed: %w; stderr=%s", err, stderr)
+	}
+	return nil
 }

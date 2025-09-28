@@ -55,6 +55,10 @@ func main() {
 	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
 	flag.Parse()
 
+	if sock == "" {
+		sock = os.Getenv("OPX_SOCKET_PATH")
+	}
+
 	if showVersion {
 		fmt.Printf("opx-authd version: %s\n", version)
 		if commit != "unknown" {

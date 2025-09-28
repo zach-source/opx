@@ -157,6 +157,59 @@ func TestSessionAwareBackend_ReadRefWithFlags(t *testing.T) {
 	}
 }
 
+func TestSessionAwareBackend_FlagsPassthrough(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("flags passed to fake backend", func(t *testing.T) {
+		fake := &Fake{}
+		sessionManager := session.NewManager(session.DefaultConfig())
+		sessionManager.MarkAuthenticated()
+		sessionAware := NewSessionAwareBackend(fake, sessionManager)
+
+		result1, err := sessionAware.ReadRef(ctx, "op://vault/item/field")
+		if err != nil {
+			t.Fatalf("No flags error: %v", err)
+		}
+
+		result2, err := sessionAware.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+		if err != nil {
+			t.Fatalf("With flags error: %v", err)
+		}
+
+		if result1 == result2 {
+			t.Error("Expected different results with different flags")
+		}
+	})
+
+	t.Run("same flags produce same result", func(t *testing.T) {
+		fake := &Fake{}
+		sessionManager := session.NewManager(session.DefaultConfig())
+		sessionManager.MarkAuthenticated()
+		sessionAware := NewSessionAwareBackend(fake, sessionManager)
+
+		result1, _ := sessionAware.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+		result2, _ := sessionAware.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC123"})
+
+		if result1 != result2 {
+			t.Errorf("Expected same results with same flags: %s vs %s", result1, result2)
+		}
+	})
+
+	t.Run("different accounts produce different results", func(t *testing.T) {
+		fake := &Fake{}
+		sessionManager := session.NewManager(session.DefaultConfig())
+		sessionManager.MarkAuthenticated()
+		sessionAware := NewSessionAwareBackend(fake, sessionManager)
+
+		result1, _ := sessionAware.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC1"})
+		result2, _ := sessionAware.ReadRefWithFlags(ctx, "op://vault/item/field", []string{"--account=ACC2"})
+
+		if result1 == result2 {
+			t.Error("Expected different results for different accounts")
+		}
+	})
+}
+
 func TestSessionAwareBackend_ActivityTracking(t *testing.T) {
 	ctx := context.Background()
 	backend := &mockBackend{
