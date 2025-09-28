@@ -50,11 +50,6 @@ func (OpCLI) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (
 		}
 	}
 
-	// Pre-flight check: Verify session is authenticated before attempting read
-	if err := validateSessionWithFlags(ctx, flags); err != nil {
-		return "", err
-	}
-
 	// Build command args: op [global-flags] read --no-color ref
 	args := []string{}
 
