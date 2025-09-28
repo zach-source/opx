@@ -47,14 +47,17 @@ brew services start opx
 opx-authd --enable-audit-log --verbose
 ```
 
-### Nix (Declarative Installation) - *In Development*
+### Nix (Declarative Installation)
 
 ```bash
-# Nix packages are being developed - coming soon!
-# Repository: github:zach-source/nix-packages
+# Install directly
+nix profile install github:zach-source/nix-packages#opx
 
-# Development environment available
-nix-shell -p go darwin.apple_sdk.frameworks.Security
+# Or add to flake.nix
+{
+  inputs.zach-utils.url = "github:zach-source/nix-packages";
+  # Then use: zach-utils.packages.${system}.opx
+}
 ```
 
 **Home Manager Integration (Recommended):**
@@ -155,6 +158,7 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `OP_AUTHD_BACKEND=fake` - Set backend for testing (default: `opcli`)
 - `OPX_AUTOSTART=0` - Disable client auto-starting daemon
 - `OPX_AUTHD_PATH=/path/to/opx-authd` - Custom path to daemon binary
+- `OPX_SOCKET_PATH=/tmp/custom.sock` - Custom socket path (both client and daemon)
 - `OP_AUTHD_SESSION_TIMEOUT=8h` - Session timeout (duration format)
 - `OP_AUTHD_ENABLE_SESSION_LOCK=true` - Enable session management
 
@@ -164,32 +168,48 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `XDG_RUNTIME_DIR` - Runtime directory base (system-specific)
 
 ## Client Usage
+
+### Multi-Account Support
+The `--account` flag can be placed before OR after the command:
+
 ```bash
-# Login to 1Password
-./bin/opx login --account=MY_ACCOUNT
-
-# Read from different backends
-./bin/opx read "op://Engineering/DB/password"           # 1Password
-./bin/opx read "vault://secret/myapp/config#password"   # HashiCorp Vault
-./bin/opx read "bao://kv/production/api#key"           # OpenBao
-
-# Batch read from multiple backends
-./bin/opx read op://Vault/A/secret1 vault://secret/B/secret2
-
-# Resolve env vars then run a command locally
-./bin/opx run --env DB_PASS=op://Engineering/DB/password --env API_KEY=vault://secret/api#key -- bash -lc 'echo "db pass: $DB_PASS, api: $API_KEY"'
-
-# Check daemon status
-./bin/opx status
-
-# View recent access denials
-./bin/opx audit --since=1h
-
-# Interactive policy management
-./bin/opx audit --interactive
+# Both work identically:
+opx read "op://vault/item/field" --account=ACCOUNT_ID
+opx --account=ACCOUNT_ID read "op://vault/item/field"
 ```
 
-The client will attempt to autostart the daemon if it can't connect. You can disable this via `OPX_AUTOSTART=0`.
+### Basic Operations
+```bash
+# Read from different backends (uses 1Password app integration)
+opx read "op://Engineering/DB/password"           # 1Password
+opx read "vault://secret/myapp/config#password"   # HashiCorp Vault
+opx read "bao://kv/production/api#key"           # OpenBao
+
+# Multi-account 1Password
+opx read "op://Private/SSH/key" --account=PERSONAL_ACCOUNT
+opx read "op://Work/API/token" --account=WORK_ACCOUNT
+
+# Batch read from multiple backends
+opx read op://Vault/A/secret1 vault://secret/B/secret2
+
+# Resolve env vars then run a command
+opx run --env DB_PASS=op://Engineering/DB/password --env API_KEY=vault://secret/api#key -- bash -lc 'echo "db: $DB_PASS"'
+
+# Check daemon status
+opx status
+
+# View recent access denials
+opx audit --since=1h
+
+# Interactive policy management
+opx audit --interactive
+```
+
+### Authentication
+No explicit login required if 1Password app is unlocked (biometric/touch integration).
+Session starts automatically on first successful read and persists for the configured idle timeout (default: 8 hours).
+
+The client will autostart the daemon if it can't connect. Disable via `OPX_AUTOSTART=0`.
 
 ## Supported URI Schemes
 
