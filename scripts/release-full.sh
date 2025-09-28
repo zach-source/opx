@@ -41,8 +41,12 @@ info "Running tests..."
 go test ./... || error "Tests failed"
 success "Tests passed"
 
+info "Cleaning previous build artifacts..."
+make clean || error "Clean failed"
+success "Build artifacts cleaned"
+
 info "Building binaries..."
-make clean && make build || error "Build failed"
+make build || error "Build failed"
 success "Binaries built"
 
 ARCH=$(arch)
@@ -56,6 +60,7 @@ else
 fi
 
 info "Creating release archives..."
+rm -rf dist
 mkdir -p dist
 cd bin
 tar czf ../dist/opx-server_${VERSION}_darwin_${ARCH}_signed.tar.gz opx-authd
