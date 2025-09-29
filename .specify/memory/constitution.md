@@ -1,13 +1,13 @@
 <!--
 Sync Impact Report:
-- Version change: INITIAL → 1.0.0
-- New constitution created from template
-- Added principles: Security-First, Zero-Trust Architecture, Defense in Depth,
-  Session Management, Testing Discipline, Backend Abstraction, Clean Architecture
+- Version change: 1.0.0 → 1.1.0
+- Modified principles: None renamed
+- Added sections: IX. Structured Logging & Observability (new principle)
+- Removed sections: None
 - Templates status:
-  ✅ plan-template.md - reviewed, constitution principles align
-  ✅ spec-template.md - reviewed, security requirements compatible
-  ✅ tasks-template.md - reviewed, testing discipline reflected
+  ✅ plan-template.md - reviewed, logging requirements align
+  ✅ spec-template.md - reviewed, observability requirements compatible
+  ✅ tasks-template.md - reviewed, logging discipline reflected
   ✅ agent-file-template.md - reviewed, no conflicts
 - Follow-up: None - all placeholders resolved
 -->
@@ -123,6 +123,7 @@ internal/
   policy/    → Access control rules
   audit/     → Structured logging
   util/      → File paths, TLS, helpers
+  config/    → Configuration management
 ```
 
 **Non-Negotiable Rules:**
@@ -155,6 +156,29 @@ func (m *Manager) PublicMethod() {
 ```
 
 **Rationale**: The v0.4.0 deadlock (ValidateAccountSession calling GetAccountSession) demonstrated the critical importance of careful lock management. Recursive locking causes production hangs.
+
+### IX. Structured Logging & Observability
+
+All daemon logging MUST use structured logging for operations visibility and debugging.
+
+**Non-Negotiable Rules:**
+- ALL daemon logging MUST use Zap structured logger (not stdlib log or fmt.Printf)
+- Development mode MUST use human-readable console output (`zap.NewDevelopment()`)
+- Production mode MUST use JSON structured output (`zap.NewProduction()`)
+- Log levels MUST be appropriate: Debug (verbose), Info (normal), Warn (issues), Error/Fatal (problems)
+- Secrets MUST NEVER appear in logs (redact sensitive values)
+- Client CLI output MUST remain human-readable (fmt.Printf for user interaction)
+
+**Required Logging Patterns:**
+```go
+// Development mode (--verbose):
+2025-09-28T23:23:08.049-0400	INFO	server/server.go:201	op-authd listening...
+
+// Production mode:
+{"level":"info","ts":1727576588.049,"caller":"server/server.go:201","msg":"op-authd listening..."}
+```
+
+**Rationale**: Structured logging enables log aggregation, monitoring, and operational debugging. The v0.7.0 implementation with Zap provides performance benefits over stdlib logging while maintaining observability for production systems.
 
 ## Security Requirements
 
@@ -261,6 +285,7 @@ All pull requests and code reviews MUST verify:
 - Testing discipline met (coverage requirements, race detection)
 - Architecture boundaries respected (no layer violations)
 - Concurrency safety maintained (proper lock usage)
+- Structured logging used for daemon code (no fmt.Printf or log.Printf)
 
 ### Version Semantics
 
@@ -268,4 +293,4 @@ All pull requests and code reviews MUST verify:
 - **MINOR** (x.Y.0): New principle added or existing principle materially expanded
 - **PATCH** (x.y.Z): Clarifications, typo fixes, non-semantic refinements
 
-**Version**: 1.0.0 | **Ratified**: 2025-09-28 | **Last Amended**: 2025-09-28
+**Version**: 1.1.0 | **Ratified**: 2025-09-28 | **Last Amended**: 2025-09-29
