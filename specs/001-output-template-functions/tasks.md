@@ -42,10 +42,10 @@
 
 ## Phase 3.3: Core Implementation
 
-- [ ] **T010** [P] Implement SafeFunctionRegistry in internal/template/safe_functions.go (allowlisted Sprig functions)
-- [ ] **T011** [P] Implement TemplateCache in internal/template/cache.go (compilation caching with LRU)
-- [ ] **T012** [P] Implement reference parser in internal/template/parser.go (query parameter extraction)
-- [ ] **T013** Implement TemplateProcessor in internal/template/processor.go (main processing logic with timeout)
+- [x] **T010** [P] Implement SafeFunctionRegistry in internal/template/safe_functions.go (allowlisted Sprig functions)
+- [x] **T011** [P] Implement TemplateCache in internal/template/cache.go (compilation caching with LRU)
+- [x] **T012** [P] Implement reference parser in internal/template/parser.go (query parameter extraction)
+- [x] **T013** Implement TemplateProcessor in internal/template/processor.go (main processing logic with timeout)
 
 ## Phase 3.4: Server Integration
 

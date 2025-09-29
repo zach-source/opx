@@ -29,41 +29,48 @@ func createSafeFunctionMap() template.FuncMap {
 	allFunctions := sprig.TxtFuncMap()
 	safeFunctions := template.FuncMap{}
 
+	// Helper function to safely add functions
+	addIfExists := func(safeName, sprigName string) {
+		if fn, exists := allFunctions[sprigName]; exists {
+			safeFunctions[safeName] = fn
+		}
+	}
+
 	// String manipulation functions
-	safeFunctions["trim"] = allFunctions["trim"]
-	safeFunctions["trimSpace"] = allFunctions["trimSpace"]
-	safeFunctions["title"] = allFunctions["title"]
-	safeFunctions["upper"] = allFunctions["upper"]
-	safeFunctions["lower"] = allFunctions["lower"]
-	safeFunctions["replace"] = allFunctions["replace"]
-	safeFunctions["split"] = allFunctions["split"]
-	safeFunctions["join"] = allFunctions["join"]
+	addIfExists("trim", "trim")
+	addIfExists("trimSpace", "trimSpace")
+	addIfExists("title", "title")
+	addIfExists("upper", "upper")
+	addIfExists("lower", "lower")
+	addIfExists("replace", "replace")
+	addIfExists("split", "split")
+	addIfExists("join", "join")
 
 	// Encoding functions
-	safeFunctions["b64enc"] = allFunctions["b64enc"]
-	safeFunctions["b64dec"] = allFunctions["b64dec"]
-	safeFunctions["base64encode"] = allFunctions["b64enc"]
-	safeFunctions["base64decode"] = allFunctions["b64dec"]
-	safeFunctions["urlquery"] = allFunctions["urlquery"]
+	addIfExists("b64enc", "b64enc")
+	addIfExists("b64dec", "b64dec")
+	addIfExists("base64encode", "b64enc")
+	addIfExists("base64decode", "b64dec")
+	addIfExists("urlquery", "urlquery")
 
 	// Math functions
-	safeFunctions["add"] = allFunctions["add"]
-	safeFunctions["sub"] = allFunctions["sub"]
-	safeFunctions["mul"] = allFunctions["mul"]
-	safeFunctions["div"] = allFunctions["div"]
-	safeFunctions["mod"] = allFunctions["mod"]
-	safeFunctions["max"] = allFunctions["max"]
-	safeFunctions["min"] = allFunctions["min"]
+	addIfExists("add", "add")
+	addIfExists("sub", "sub")
+	addIfExists("mul", "mul")
+	addIfExists("div", "div")
+	addIfExists("mod", "mod")
+	addIfExists("max", "max")
+	addIfExists("min", "min")
 
 	// Logic functions
-	safeFunctions["default"] = allFunctions["default"]
-	safeFunctions["empty"] = allFunctions["empty"]
-	safeFunctions["coalesce"] = allFunctions["coalesce"]
-	safeFunctions["ternary"] = allFunctions["ternary"]
+	addIfExists("default", "default")
+	addIfExists("empty", "empty")
+	addIfExists("coalesce", "coalesce")
+	addIfExists("ternary", "ternary")
 
 	// Date functions (safe subset)
-	safeFunctions["now"] = allFunctions["now"]
-	safeFunctions["date"] = allFunctions["date"]
+	addIfExists("now", "now")
+	addIfExists("date", "date")
 
 	return safeFunctions
 }
