@@ -27,18 +27,18 @@
 
 ## Phase 3.1: Setup
 
-- [ ] **T001** Add Masterminds/sprig v3 dependency to go.mod
-- [ ] **T002** Create internal/template/ package structure with processor.go, safe_functions.go, parser.go, cache.go
-- [ ] **T003** [P] Configure template processor tests in internal/template/processor_test.go
+- [x] **T001** Add Masterminds/sprig v3 dependency to go.mod
+- [x] **T002** Create internal/template/ package structure with processor.go, safe_functions.go, parser.go, cache.go
+- [x] **T003** [P] Configure template processor tests in internal/template/processor_test.go
 
 ## Phase 3.2: Tests First (TDD) ⚠️ MUST COMPLETE BEFORE 3.3
 
-- [ ] **T004** [P] Write TemplateProcessor interface tests in internal/template/processor_test.go
-- [ ] **T005** [P] Write SafeFunctionRegistry tests in internal/template/safe_functions_test.go
-- [ ] **T006** [P] Write reference parsing tests in internal/template/parser_test.go
-- [ ] **T007** [P] Write template cache tests in internal/template/cache_test.go
-- [ ] **T008** [P] Write template security tests (blocked functions) in internal/template/security_test.go
-- [ ] **T009** [P] Write template timeout tests in internal/template/timeout_test.go
+- [x] **T004** [P] Write TemplateProcessor interface tests in internal/template/processor_test.go
+- [x] **T005** [P] Write SafeFunctionRegistry tests in internal/template/safe_functions_test.go
+- [x] **T006** [P] Write reference parsing tests in internal/template/parser_test.go
+- [x] **T007** [P] Write template cache tests in internal/template/cache_test.go
+- [x] **T008** [P] Write template security tests (blocked functions) in internal/template/security_test.go
+- [x] **T009** [P] Write template timeout tests in internal/template/timeout_test.go
 
 ## Phase 3.3: Core Implementation
 
