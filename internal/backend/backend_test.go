@@ -84,7 +84,8 @@ func (m *Mock) ReadRefWithFlags(ctx context.Context, ref string, flags []string)
 // TestBackendInterface ensures both implementations satisfy the Backend interface
 func TestBackendInterface(t *testing.T) {
 	var _ Backend = &Fake{}
-	var _ Backend = &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op") // Test with dummy path
+	var _ Backend = opcli
 	var _ Backend = NewMock("test")
 }
 
@@ -270,14 +271,14 @@ func TestMock_WithFlags(t *testing.T) {
 
 // TestOpCLI tests the OpCLI backend implementation
 func TestOpCLI_Name(t *testing.T) {
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 	if name := opcli.Name(); name != "opcli" {
 		t.Errorf("Expected name 'opcli', got %q", name)
 	}
 }
 
 func TestOpCLI_EmptyRef(t *testing.T) {
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 	ctx := context.Background()
 
 	tests := []string{
@@ -301,7 +302,7 @@ func TestOpCLI_EmptyRef(t *testing.T) {
 
 // TestOpCLI_CommandExecution tests the command execution without actually calling op
 func TestOpCLI_CommandExecution(t *testing.T) {
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 	ctx := context.Background()
 
 	_, err := opcli.ReadRef(ctx, "op://nonexistent-vault/item/field")
@@ -319,7 +320,7 @@ func TestOpCLI_CommandExecution(t *testing.T) {
 }
 
 func TestOpCLI_ContextTimeout(t *testing.T) {
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 	defer cancel()
@@ -523,7 +524,7 @@ func TestOpCLI_Integration(t *testing.T) {
 		t.Skipf("op command not found: %v", err)
 	}
 
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 	ctx := context.Background()
 
 	// Test with a simple command that should work if op is configured
@@ -634,7 +635,7 @@ func TestOpx_EndToEndIntegration(t *testing.T) {
 
 // TestOpCLI_ValidationSecurity tests the new security validations
 func TestOpCLI_ValidationSecurity(t *testing.T) {
-	opcli := &OpCLI{}
+	opcli, _ := NewOpCLI("/usr/bin/op")
 	ctx := context.Background()
 
 	tests := []struct {

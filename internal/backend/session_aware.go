@@ -102,11 +102,15 @@ func ClearCLISession() error {
 }
 
 // NewSessionAwareOpCLI creates a new OpCLI backend with session management
-func NewSessionAwareOpCLI(sessionManager *session.Manager) Backend {
+func NewSessionAwareOpCLI(sessionManager *session.Manager, opPath string) (Backend, error) {
 	// Set up session callbacks
 	sessionManager.SetCallbacks(ClearCLISession, ValidateCurrentSession)
 
-	return NewSessionAwareBackend(OpCLI{}, sessionManager)
+	opcli, err := NewOpCLI(opPath)
+	if err != nil {
+		return nil, err
+	}
+	return NewSessionAwareBackend(opcli, sessionManager), nil
 }
 
 // NewSessionAwareFake creates a new Fake backend with session management for testing

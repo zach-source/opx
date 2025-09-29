@@ -15,6 +15,7 @@ import (
 	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
+	"github.com/zach-source/opx/internal/config"
 	"github.com/zach-source/opx/internal/policy"
 	"github.com/zach-source/opx/internal/server"
 	"github.com/zach-source/opx/internal/session"
@@ -26,6 +27,89 @@ var (
 	commit  = "unknown"
 	date    = "unknown"
 )
+
+// createOpCLIBackend creates a 1Password CLI backend with optional session management
+func createOpCLIBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+	opPath, err := cfg.GetOpPath()
+	if err != nil {
+		log.Printf("[ERROR] Failed to find 1Password CLI: %v", err)
+		log.Printf("[INFO] Falling back to fake backend for testing")
+		return backend.Fake{}
+	}
+
+	opcli, err := backend.NewOpCLI(opPath)
+	if err != nil {
+		log.Printf("[ERROR] Failed to initialize 1Password CLI backend: %v", err)
+		log.Printf("[INFO] Falling back to fake backend for testing")
+		return backend.Fake{}
+	}
+
+	return wrapWithSessionManagement(opcli, multiAccountSession, sessionManager, opPath)
+}
+
+// createFakeBackend creates a fake backend with optional session management
+func createFakeBackend(multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+	fake := backend.Fake{}
+	return wrapWithSessionManagement(fake, multiAccountSession, sessionManager, "")
+}
+
+// createVaultBackend creates a Vault backend with optional session management
+func createVaultBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+	// TODO: Load vault config from file and use cfg.GetVaultPath()
+	vaultConfig := backend.VaultConfig{
+		Address:    "http://localhost:8200",
+		AuthMethod: "token",
+	}
+	vault := backend.NewVault(vaultConfig)
+	return wrapWithSessionManagement(vault, multiAccountSession, sessionManager, "")
+}
+
+// createBaoBackend creates a Bao backend with optional session management
+func createBaoBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+	// TODO: Load bao config from file and use cfg.GetBaoPath()
+	baoConfig := backend.VaultConfig{
+		Address:    "http://localhost:8300",
+		AuthMethod: "token",
+	}
+	bao := backend.NewBao(baoConfig)
+	return wrapWithSessionManagement(bao, multiAccountSession, sessionManager, "")
+}
+
+// createMultiBackend creates a multi-backend that routes by URI scheme
+func createMultiBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+	opBe := createOpCLIBackend(cfg, multiAccountSession, sessionManager)
+	vaultBe := createVaultBackend(cfg, multiAccountSession, sessionManager)
+	baoBe := createBaoBackend(cfg, multiAccountSession, sessionManager)
+
+	return backend.NewMultiBackend(opBe, vaultBe, baoBe, "op")
+}
+
+// wrapWithSessionManagement wraps a backend with appropriate session management
+func wrapWithSessionManagement(be backend.Backend, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, opPath string) backend.Backend {
+	if multiAccountSession != nil {
+		return backend.NewMultiAccountSessionAwareBackend(be, multiAccountSession)
+	}
+
+	if sessionManager != nil {
+		// For OpCLI backends, use the specialized session-aware wrapper
+		if opPath != "" {
+			sessionAware, err := backend.NewSessionAwareOpCLI(sessionManager, opPath)
+			if err != nil {
+				log.Printf("[ERROR] Failed to initialize session-aware OpCLI: %v", err)
+				return backend.Fake{}
+			}
+			return sessionAware
+		}
+		// For fake backend, use the specialized fake wrapper
+		if _, isFake := be.(backend.Fake); isFake {
+			return backend.NewSessionAwareFake(sessionManager)
+		}
+		// For other backends (Vault, Bao)
+		return backend.NewSessionAwareBackend(be, sessionManager)
+	}
+
+	return be
+}
 
 func main() {
 	var ttlSec int
@@ -70,9 +154,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Load daemon configuration
+	daemonConfig, err := config.LoadConfig()
+	if err != nil {
+		log.Printf("Warning: failed to load daemon config: %v, using defaults", err)
+		daemonConfig = config.DefaultConfig()
+	}
+
 	// Load session configuration from custom file or default locations
 	var sessionConfig *session.Config
-	var err error
 	if configFile != "" {
 		sessionConfig, err = session.LoadConfigFromFile(configFile)
 		if err != nil {
@@ -116,53 +206,15 @@ func main() {
 	var be backend.Backend
 	switch backendName {
 	case "opcli":
-		if multiAccountSession != nil {
-			be = backend.NewMultiAccountSessionAwareBackend(backend.OpCLI{}, multiAccountSession)
-		} else if sessionManager != nil {
-			be = backend.NewSessionAwareOpCLI(sessionManager)
-		} else {
-			be = backend.OpCLI{}
-		}
+		be = createOpCLIBackend(daemonConfig, multiAccountSession, sessionManager)
 	case "fake":
-		if multiAccountSession != nil {
-			be = backend.NewMultiAccountSessionAwareBackend(backend.Fake{}, multiAccountSession)
-		} else if sessionManager != nil {
-			be = backend.NewSessionAwareFake(sessionManager)
-		} else {
-			be = backend.Fake{}
-		}
+		be = createFakeBackend(multiAccountSession, sessionManager)
 	case "vault":
-		// TODO: Load vault config from file
-		vaultConfig := backend.VaultConfig{
-			Address:    "http://localhost:8200", // Default local Vault
-			AuthMethod: "token",
-		}
-		be = backend.NewVault(vaultConfig)
+		be = createVaultBackend(daemonConfig, multiAccountSession, sessionManager)
 	case "bao":
-		// TODO: Load bao config from file
-		baoConfig := backend.VaultConfig{
-			Address:    "http://localhost:8300", // Default local Bao
-			AuthMethod: "token",
-		}
-		be = backend.NewBao(baoConfig)
+		be = createBaoBackend(daemonConfig, multiAccountSession, sessionManager)
 	case "multi":
-		// Create multi-backend with all backends available
-		var opBe backend.Backend = backend.OpCLI{}
-		if multiAccountSession != nil {
-			opBe = backend.NewMultiAccountSessionAwareBackend(backend.OpCLI{}, multiAccountSession)
-		} else if sessionManager != nil {
-			opBe = backend.NewSessionAwareOpCLI(sessionManager)
-		}
-
-		vaultBe := backend.NewVault(backend.VaultConfig{
-			Address:    "http://localhost:8200",
-			AuthMethod: "token",
-		})
-		baoBe := backend.NewBao(backend.VaultConfig{
-			Address:    "http://localhost:8300",
-			AuthMethod: "token",
-		})
-		be = backend.NewMultiBackend(opBe, vaultBe, baoBe, "op")
+		be = createMultiBackend(daemonConfig, multiAccountSession, sessionManager)
 	default:
 		log.Fatalf("unknown backend: %s", backendName)
 	}

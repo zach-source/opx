@@ -304,7 +304,10 @@ func TestClearCLISession_Integration(t *testing.T) {
 func TestNewSessionAwareOpCLI(t *testing.T) {
 	sessionManager := session.NewManager(session.DefaultConfig())
 
-	backend := NewSessionAwareOpCLI(sessionManager)
+	backend, err := NewSessionAwareOpCLI(sessionManager, "/usr/bin/op")
+	if err != nil {
+		t.Fatalf("Failed to create session-aware OpCLI: %v", err)
+	}
 
 	if backend.Name() != "opcli+session" {
 		t.Errorf("Expected name 'opcli+session', got %q", backend.Name())
@@ -316,7 +319,7 @@ func TestNewSessionAwareOpCLI(t *testing.T) {
 		t.Error("Expected SessionAwareBackend type")
 	}
 
-	if sessionAware.backend.(OpCLI).Name() != "opcli" {
+	if sessionAware.backend.(*OpCLI).Name() != "opcli" {
 		t.Error("Expected wrapped backend to be OpCLI")
 	}
 }
