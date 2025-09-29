@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 
@@ -104,6 +105,7 @@ type Server struct {
 	PolicyPath          string
 	AuditLogger         *audit.Logger
 	RateLimiter         *rate.Limiter
+	Logger              *zap.SugaredLogger
 	Verbose             bool
 	Version             string
 	StartTime           time.Time
@@ -195,8 +197,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		_ = os.Remove(s.SockPath)
 	}()
 
-	if s.Verbose {
-		log.Printf("op-authd listening on unix+tls://%s backend=%s ttl=%s", s.SockPath, s.Backend.Name(), s.CacheTTL())
+	if s.Logger != nil {
+		s.Logger.Infof("op-authd listening on unix+tls://%s backend=%s ttl=%s", s.SockPath, s.Backend.Name(), s.CacheTTL())
 	}
 
 	return srv.Serve(peerListener)

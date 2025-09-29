@@ -12,6 +12,8 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"go.uber.org/zap"
+
 	"github.com/zach-source/opx/internal/audit"
 	"github.com/zach-source/opx/internal/backend"
 	"github.com/zach-source/opx/internal/cache"
@@ -29,63 +31,63 @@ var (
 )
 
 // createOpCLIBackend creates a 1Password CLI backend with optional session management
-func createOpCLIBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+func createOpCLIBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, logger *zap.SugaredLogger) backend.Backend {
 	opPath, err := cfg.GetOpPath()
 	if err != nil {
-		log.Printf("[ERROR] Failed to find 1Password CLI: %v", err)
-		log.Printf("[INFO] Falling back to fake backend for testing")
+		logger.Errorf("Failed to find 1Password CLI: %v", err)
+		logger.Info("Falling back to fake backend for testing")
 		return backend.Fake{}
 	}
 
 	opcli, err := backend.NewOpCLI(opPath)
 	if err != nil {
-		log.Printf("[ERROR] Failed to initialize 1Password CLI backend: %v", err)
-		log.Printf("[INFO] Falling back to fake backend for testing")
+		logger.Errorf("Failed to initialize 1Password CLI backend: %v", err)
+		logger.Info("Falling back to fake backend for testing")
 		return backend.Fake{}
 	}
 
-	return wrapWithSessionManagement(opcli, multiAccountSession, sessionManager, opPath)
+	return wrapWithSessionManagement(opcli, multiAccountSession, sessionManager, opPath, logger)
 }
 
 // createFakeBackend creates a fake backend with optional session management
-func createFakeBackend(multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+func createFakeBackend(multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, logger *zap.SugaredLogger) backend.Backend {
 	fake := backend.Fake{}
-	return wrapWithSessionManagement(fake, multiAccountSession, sessionManager, "")
+	return wrapWithSessionManagement(fake, multiAccountSession, sessionManager, "", logger)
 }
 
 // createVaultBackend creates a Vault backend with optional session management
-func createVaultBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+func createVaultBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, logger *zap.SugaredLogger) backend.Backend {
 	// TODO: Load vault config from file and use cfg.GetVaultPath()
 	vaultConfig := backend.VaultConfig{
 		Address:    "http://localhost:8200",
 		AuthMethod: "token",
 	}
 	vault := backend.NewVault(vaultConfig)
-	return wrapWithSessionManagement(vault, multiAccountSession, sessionManager, "")
+	return wrapWithSessionManagement(vault, multiAccountSession, sessionManager, "", logger)
 }
 
 // createBaoBackend creates a Bao backend with optional session management
-func createBaoBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
+func createBaoBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, logger *zap.SugaredLogger) backend.Backend {
 	// TODO: Load bao config from file and use cfg.GetBaoPath()
 	baoConfig := backend.VaultConfig{
 		Address:    "http://localhost:8300",
 		AuthMethod: "token",
 	}
 	bao := backend.NewBao(baoConfig)
-	return wrapWithSessionManagement(bao, multiAccountSession, sessionManager, "")
+	return wrapWithSessionManagement(bao, multiAccountSession, sessionManager, "", logger)
 }
 
 // createMultiBackend creates a multi-backend that routes by URI scheme
-func createMultiBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager) backend.Backend {
-	opBe := createOpCLIBackend(cfg, multiAccountSession, sessionManager)
-	vaultBe := createVaultBackend(cfg, multiAccountSession, sessionManager)
-	baoBe := createBaoBackend(cfg, multiAccountSession, sessionManager)
+func createMultiBackend(cfg *config.Config, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, logger *zap.SugaredLogger) backend.Backend {
+	opBe := createOpCLIBackend(cfg, multiAccountSession, sessionManager, logger)
+	vaultBe := createVaultBackend(cfg, multiAccountSession, sessionManager, logger)
+	baoBe := createBaoBackend(cfg, multiAccountSession, sessionManager, logger)
 
 	return backend.NewMultiBackend(opBe, vaultBe, baoBe, "op")
 }
 
 // wrapWithSessionManagement wraps a backend with appropriate session management
-func wrapWithSessionManagement(be backend.Backend, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, opPath string) backend.Backend {
+func wrapWithSessionManagement(be backend.Backend, multiAccountSession *session.MultiAccountManager, sessionManager *session.Manager, opPath string, logger *zap.SugaredLogger) backend.Backend {
 	if multiAccountSession != nil {
 		return backend.NewMultiAccountSessionAwareBackend(be, multiAccountSession)
 	}
@@ -95,7 +97,7 @@ func wrapWithSessionManagement(be backend.Backend, multiAccountSession *session.
 		if opPath != "" {
 			sessionAware, err := backend.NewSessionAwareOpCLI(sessionManager, opPath)
 			if err != nil {
-				log.Printf("[ERROR] Failed to initialize session-aware OpCLI: %v", err)
+				logger.Errorf("Failed to initialize session-aware OpCLI: %v", err)
 				return backend.Fake{}
 			}
 			return sessionAware
@@ -143,6 +145,22 @@ func main() {
 		sock = os.Getenv("OPX_SOCKET_PATH")
 	}
 
+	// Initialize structured logger
+	var logger *zap.Logger
+	var err error
+	if verbose {
+		// Development mode: human-readable console output
+		logger, err = zap.NewDevelopment()
+	} else {
+		// Production mode: JSON structured output
+		logger, err = zap.NewProduction()
+	}
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer logger.Sync()
+	sugar := logger.Sugar()
+
 	if showVersion {
 		fmt.Printf("opx-authd version: %s\n", version)
 		if commit != "unknown" {
@@ -157,7 +175,7 @@ func main() {
 	// Load daemon configuration
 	daemonConfig, err := config.LoadConfig()
 	if err != nil {
-		log.Printf("Warning: failed to load daemon config: %v, using defaults", err)
+		sugar.Warnw("Failed to load daemon config, using defaults", "error", err)
 		daemonConfig = config.DefaultConfig()
 	}
 
@@ -166,15 +184,13 @@ func main() {
 	if configFile != "" {
 		sessionConfig, err = session.LoadConfigFromFile(configFile)
 		if err != nil {
-			log.Fatalf("Failed to load config from %s: %v", configFile, err)
+			sugar.Fatalw("Failed to load config from file", "path", configFile, "error", err)
 		}
-		if verbose {
-			log.Printf("Loaded session config from %s", configFile)
-		}
+		sugar.Infow("Loaded session config from file", "path", configFile)
 	} else {
 		sessionConfig, err = session.LoadConfig()
 		if err != nil {
-			log.Printf("Warning: failed to load session config: %v, using defaults", err)
+			sugar.Warnw("Failed to load session config, using defaults", "error", err)
 			sessionConfig = session.DefaultConfig()
 		}
 	}
@@ -206,17 +222,17 @@ func main() {
 	var be backend.Backend
 	switch backendName {
 	case "opcli":
-		be = createOpCLIBackend(daemonConfig, multiAccountSession, sessionManager)
+		be = createOpCLIBackend(daemonConfig, multiAccountSession, sessionManager, sugar)
 	case "fake":
-		be = createFakeBackend(multiAccountSession, sessionManager)
+		be = createFakeBackend(multiAccountSession, sessionManager, sugar)
 	case "vault":
-		be = createVaultBackend(daemonConfig, multiAccountSession, sessionManager)
+		be = createVaultBackend(daemonConfig, multiAccountSession, sessionManager, sugar)
 	case "bao":
-		be = createBaoBackend(daemonConfig, multiAccountSession, sessionManager)
+		be = createBaoBackend(daemonConfig, multiAccountSession, sessionManager, sugar)
 	case "multi":
-		be = createMultiBackend(daemonConfig, multiAccountSession, sessionManager)
+		be = createMultiBackend(daemonConfig, multiAccountSession, sessionManager, sugar)
 	default:
-		log.Fatalf("unknown backend: %s", backendName)
+		sugar.Fatalw("Unknown backend specified", "backend", backendName)
 	}
 
 	// Load access policy from custom file or default location
@@ -252,18 +268,18 @@ func main() {
 		}
 		auditLogger, err = audit.NewLoggerWithConfig(true, rollerConfig)
 		if err != nil {
-			log.Fatalf("Failed to create audit logger: %v", err)
+			sugar.Fatalw("Failed to create audit logger with rotation", "error", err)
 		}
 		defer auditLogger.Close()
 	} else {
 		auditLogger, err = audit.NewLogger(false)
 		if err != nil {
-			log.Fatalf("Failed to create audit logger: %v", err)
+			sugar.Fatalw("Failed to create disabled audit logger", "error", err)
 		}
 	}
 
-	if enableAuditLog && verbose {
-		log.Printf("Audit logging enabled")
+	if enableAuditLog {
+		sugar.Info("Audit logging enabled")
 	}
 
 	// Create rate limiter: 10 requests per second with burst of 5
@@ -279,6 +295,7 @@ func main() {
 		PolicyPath:          policyPath,
 		AuditLogger:         auditLogger,
 		RateLimiter:         rateLimiter,
+		Logger:              sugar,
 		Verbose:             verbose,
 		Version:             version,
 	}
