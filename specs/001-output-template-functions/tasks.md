@@ -49,9 +49,9 @@
 
 ## Phase 3.4: Server Integration
 
-- [ ] **T014** Add TemplateProcessor field to Server struct in internal/server/server.go
-- [ ] **T015** Update readOneWithFlags function in internal/server/server.go to process templates after backend retrieval
-- [ ] **T016** Update handleRead endpoint in internal/server/server.go to parse template references
+- [x] **T014** Add TemplateProcessor field to Server struct in internal/server/server.go
+- [x] **T015** Update readOneWithFlags function in internal/server/server.go to process templates after backend retrieval
+- [x] **T016** Update handleRead endpoint in internal/server/server.go to parse template references
 - [ ] **T017** Update handleReads batch endpoint in internal/server/server.go for template support
 - [ ] **T018** Update handleResolve endpoint in internal/server/server.go for env var template processing
 

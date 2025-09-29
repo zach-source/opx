@@ -18,6 +18,7 @@ import (
 	"github.com/zach-source/opx/internal/policy"
 	"github.com/zach-source/opx/internal/server"
 	"github.com/zach-source/opx/internal/session"
+	"github.com/zach-source/opx/internal/template"
 )
 
 // Version information (set via ldflags during build)
@@ -217,6 +218,9 @@ func main() {
 	// Create rate limiter: 10 requests per second with burst of 5
 	rateLimiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 5)
 
+	// Create template processor
+	templateProcessor := template.NewProcessor()
+
 	srv := &server.Server{
 		SockPath:            sock,
 		Backend:             be,
@@ -227,6 +231,7 @@ func main() {
 		PolicyPath:          policyPath,
 		AuditLogger:         auditLogger,
 		RateLimiter:         rateLimiter,
+		TemplateProcessor:   templateProcessor,
 		Verbose:             verbose,
 		Version:             version,
 	}

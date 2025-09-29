@@ -26,6 +26,7 @@ import (
 	"github.com/zach-source/opx/internal/protocol"
 	"github.com/zach-source/opx/internal/security"
 	"github.com/zach-source/opx/internal/session"
+	"github.com/zach-source/opx/internal/template"
 	"github.com/zach-source/opx/internal/util"
 )
 
@@ -104,6 +105,7 @@ type Server struct {
 	PolicyPath          string
 	AuditLogger         *audit.Logger
 	RateLimiter         *rate.Limiter
+	TemplateProcessor   template.Processor
 	Verbose             bool
 	Version             string
 	StartTime           time.Time
@@ -503,15 +505,21 @@ func (s *Server) readOne(ctx context.Context, ref string) (protocol.ReadResponse
 }
 
 func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []string) (protocol.ReadResponse, error) {
-	// Check access policy if peer information is available
+	// Parse reference for template processing
+	baseRef, templateStr, err := template.ParseReferenceWithTemplate(ref)
+	if err != nil {
+		return protocol.ReadResponse{}, fmt.Errorf("invalid reference format: %w", err)
+	}
+
+	// Use base reference for access policy check
 	if peerInfo, hasPeer := ctx.Value(peerInfoKey).(security.PeerInfo); hasPeer {
-		if !s.validateAccess(peerInfo, ref) {
+		if !s.validateAccess(peerInfo, baseRef) {
 			return protocol.ReadResponse{}, fmt.Errorf("access denied by policy")
 		}
 	}
 
-	// Create cache key that includes flags for proper cache isolation
-	cacheKey := ref
+	// Create cache key that includes flags and template for proper cache isolation
+	cacheKey := ref // Use original reference (with template) for cache key
 	if len(flags) > 0 {
 		cacheKey = ref + "|flags:" + strings.Join(flags, ",")
 	}
@@ -531,13 +539,22 @@ func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []strin
 			s.Cache.IncHit()
 			return protocol.ReadResponse{Ref: ref, Value: v, FromCache: true, ExpiresIn: int(time.Until(exp).Seconds()), ResolvedAt: cached.Unix()}, nil
 		}
-		// Read via backend
+		// Read via backend using base reference (without template)
 		ctx2, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		v, err := s.Backend.ReadRefWithFlags(ctx2, ref, flags)
+		v, err := s.Backend.ReadRefWithFlags(ctx2, baseRef, flags)
 		if err != nil {
 			return nil, err
 		}
+
+		// Apply template processing if template is present
+		if templateStr != "" && s.TemplateProcessor != nil {
+			v, err = s.TemplateProcessor.ProcessTemplate(ctx2, templateStr, v)
+			if err != nil {
+				return nil, fmt.Errorf("template processing failed: %w", err)
+			}
+		}
+
 		s.Cache.Set(cacheKey, v)
 		return protocol.ReadResponse{Ref: ref, Value: v, FromCache: false, ExpiresIn: int(s.CacheTTL().Seconds()), ResolvedAt: time.Now().Unix()}, nil
 	})
