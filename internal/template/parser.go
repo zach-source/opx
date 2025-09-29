@@ -22,7 +22,15 @@ func ParseReferenceWithTemplate(ref string) (baseRef, templateStr string, err er
 	// Extract template parameter
 	templateStr = u.Query().Get("template")
 	if templateStr == "" {
-		return ref, "", nil // Empty template parameter
+		// Handle empty template parameter case
+		q := u.Query()
+		q.Del("template")
+		u.RawQuery = q.Encode()
+		baseRef = u.String()
+		if strings.HasSuffix(baseRef, "?") {
+			baseRef = strings.TrimSuffix(baseRef, "?")
+		}
+		return baseRef, "", nil
 	}
 
 	// Remove template query parameter to get base reference

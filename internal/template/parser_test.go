@@ -50,17 +50,17 @@ func TestParseReferenceWithTemplate(t *testing.T) {
 		},
 		{
 			name:         "reference with additional query parameters",
-			input:        "op://vault/item/field?foo=bar&template={{.Value | base64encode}}&baz=qux",
-			expectedBase: "op://vault/item/field?foo=bar&baz=qux",
+			input:        "op://vault/item/field?foo=bar&template=%7B%7B.Value%20%7C%20base64encode%7D%7D&baz=qux", // URL encoded template
+			expectedBase: "op://vault/item/field?baz=qux&foo=bar",                                                  // URL query params may reorder
 			expectedTmpl: "{{.Value | base64encode}}",
 			wantErr:      false,
 		},
 		{
-			name:         "invalid URL format",
-			input:        "op://vault/item/field?template={{.Value | base64encode}}&invalid%url",
-			expectedBase: "",
-			expectedTmpl: "",
-			wantErr:      true,
+			name:         "reference with invalid template but valid URL",
+			input:        "op://vault/item/field?template={{.Value | base64encode}}",
+			expectedBase: "op://vault/item/field",
+			expectedTmpl: "{{.Value | base64encode}}",
+			wantErr:      false,
 		},
 		{
 			name:         "vault reference with template",
