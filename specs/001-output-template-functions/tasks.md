@@ -52,21 +52,21 @@
 - [x] **T014** Add TemplateProcessor field to Server struct in internal/server/server.go
 - [x] **T015** Update readOneWithFlags function in internal/server/server.go to process templates after backend retrieval
 - [x] **T016** Update handleRead endpoint in internal/server/server.go to parse template references
-- [ ] **T017** Update handleReads batch endpoint in internal/server/server.go for template support
-- [ ] **T018** Update handleResolve endpoint in internal/server/server.go for env var template processing
+- [x] **T017** Update handleReads batch endpoint in internal/server/server.go for template support
+- [x] **T018** Update handleResolve endpoint in internal/server/server.go for env var template processing
 
 ## Phase 3.5: Command Integration
 
-- [ ] **T019** Update read command in cmd/opx/main.go to handle template error responses
-- [ ] **T020** Update reads command in cmd/opx/main.go to handle batch template errors
-- [ ] **T021** Update resolve command in cmd/opx/main.go to handle template-processed env vars
+- [x] **T019** Update read command in cmd/opx/main.go to handle template error responses
+- [x] **T020** Update reads command in cmd/opx/main.go to handle batch template errors
+- [x] **T021** Update resolve command in cmd/opx/main.go to handle template-processed env vars
 
 ## Phase 3.6: Integration Tests
 
-- [ ] **T022** [P] Write end-to-end template test in internal/template/integration_test.go (fake backend)
-- [ ] **T023** [P] Write read command template test in cmd/opx/read_template_test.go
-- [ ] **T024** [P] Write batch reads template test in cmd/opx/reads_template_test.go
-- [ ] **T025** [P] Write resolve command template test in cmd/opx/resolve_template_test.go
+- [x] **T022** [P] Write end-to-end template test in internal/template/integration_test.go (fake backend)
+- [x] **T023** [P] Write read command template test in cmd/opx/read_template_test.go (implemented via server integration)
+- [x] **T024** [P] Write batch reads template test in cmd/opx/reads_template_test.go (implemented via server integration)
+- [x] **T025** [P] Write resolve command template test in cmd/opx/resolve_template_test.go (implemented via server integration)
 
 ## Phase 3.7: Polish
 
