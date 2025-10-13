@@ -8,29 +8,18 @@ import (
 
 // ParseReferenceWithTemplate extracts template from reference query parameter
 func ParseReferenceWithTemplate(ref string) (baseRef, templateStr string, err error) {
-	// Check if reference contains template query parameter
-	if !strings.Contains(ref, "?template=") {
-		return ref, "", nil // No template
-	}
-
 	// Parse as URL to extract query parameters
 	u, err := url.Parse(ref)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid reference URL format: %w", err)
 	}
 
-	// Extract template parameter
+	// Extract template parameter (handles URL encoding automatically)
 	templateStr = u.Query().Get("template")
+
+	// No template parameter found
 	if templateStr == "" {
-		// Handle empty template parameter case
-		q := u.Query()
-		q.Del("template")
-		u.RawQuery = q.Encode()
-		baseRef = u.String()
-		if strings.HasSuffix(baseRef, "?") {
-			baseRef = strings.TrimSuffix(baseRef, "?")
-		}
-		return baseRef, "", nil
+		return ref, "", nil
 	}
 
 	// Remove template query parameter to get base reference

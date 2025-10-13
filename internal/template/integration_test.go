@@ -74,7 +74,7 @@ func TestTemplateErrorHandling(t *testing.T) {
 	}{
 		{
 			name:    "invalid template syntax",
-			ref:     "op://vault/item/field?template={{.Value | }}",
+			ref:     "op://vault/item/field?template={{.Value | invalidfunc}}",
 			value:   "test",
 			wantErr: true,
 		},

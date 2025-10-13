@@ -114,6 +114,7 @@ func TestTemplateSecurity(t *testing.T) {
 	processor := &DefaultProcessor{
 		registry: NewSafeFunctionRegistry(),
 		cache:    NewCache(10),
+		timeout:  5 * time.Second,
 	}
 
 	// Test that blocked functions are rejected

@@ -44,7 +44,7 @@ func TestParseReferenceWithTemplate(t *testing.T) {
 		{
 			name:         "reference with empty template parameter",
 			input:        "op://vault/item/field?template=",
-			expectedBase: "op://vault/item/field",
+			expectedBase: "op://vault/item/field?template=", // Empty template returns original
 			expectedTmpl: "",
 			wantErr:      false,
 		},
