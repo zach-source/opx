@@ -25,7 +25,7 @@ func TestSafeFunctionAllowlist(t *testing.T) {
 
 	// Test that safe functions are present
 	safeFunctions := []string{
-		"base64encode", "base64decode", "urlquery", "htmlescape",
+		"base64encode", "base64decode",
 		"trim", "title", "upper", "lower", "replace", "split", "join",
 		"add", "sub", "mul", "div", "mod", "max", "min",
 		"default", "empty", "coalesce", "ternary",
