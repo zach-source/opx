@@ -23,9 +23,12 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
   (e.g. `my.1password.com` and `stigenai.1password.com`) that is still one
   invocation, not one per account. Covered by
   `TestReadOne_NoAccountFanout` in `internal/server`.
-- **The session cannot expire out from under the cache.** The idle timeout is
-  raised to at least the cache TTL at startup, so one unlock covers a whole
-  TTL window instead of locking mid-window and clearing the cache.
+- **Nothing stays hot past the lock window.** At startup the cache TTL is capped
+  to the session idle timeout, so a secret can never outlive the point at which
+  the session would have locked and cleared it. At the defaults (4h TTL, 8h idle
+  timeout) nothing is capped and one unlock covers a full 4h block; shortening
+  `--session-timeout` shortens the cache with it, rather than the cache silently
+  extending your lock window.
 
 - **Restarts stay warm.** The cache is mirrored to an encrypted file, so a
   restarted daemon restores unexpired entries and serves the next read from
@@ -63,7 +66,7 @@ previously they were memory-only. Turn it off with `--persist-cache=false` or
 ## Features
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
 - Bearer token with secure permissions (0600) and directory perms 0700
-- **Session idle timeout** with automatic locking after configurable period (default: 8 hours, never shorter than the cache TTL)
+- **Session idle timeout** with automatic locking after configurable period (default: 8 hours); it caps the cache TTL, so nothing outlives the lock window
 - In-memory TTL cache (default 4h, `--ttl` / `OPX_CACHE_TTL`) with single-flight coalescing and security clearing
 - **Multi-backend support**:
   - `opcli`: 1Password CLI integration with `op://` references
@@ -161,7 +164,7 @@ service) is not implemented yet — the module asserts on non-darwin.
 - `backend`: opcli, vault, bao, multi, fake (default: opcli)
 - `ttl`: Cache TTL in seconds (default: 14400 = 4h)
 - `persistCache`: Keep the cache warm across restarts in an encrypted file (default: true)
-- `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h; anything shorter than `ttl` is raised to it)
+- `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h). A value below `ttl` caps `ttl` down to it
 - `opPath`: Absolute path to the `op` binary
 - `enableAuditLog`: Enable structured audit logging
 - `auditLogRetentionDays`: Days to keep audit logs (default: 30)

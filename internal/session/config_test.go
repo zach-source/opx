@@ -265,62 +265,54 @@ func setEnv(key, value string) {
 	}
 }
 
-func TestConfig_EnsureCoversCacheTTL(t *testing.T) {
-	ttl := 4 * time.Hour
-
+func TestConfig_ClampCacheTTL(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  Config
-		raised  bool
-		timeout time.Duration
+		name   string
+		config Config
+		ttl    time.Duration
+		want   time.Duration
 	}{
 		{
-			name:    "shorter timeout is raised to the TTL",
-			config:  Config{SessionIdleTimeout: 30 * time.Minute, EnableSessionLock: true},
-			raised:  true,
-			timeout: ttl,
+			name:   "TTL longer than the lock window is capped to it",
+			config: Config{SessionIdleTimeout: 30 * time.Minute, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   30 * time.Minute,
 		},
 		{
-			name:    "longer timeout is left alone",
-			config:  Config{SessionIdleTimeout: 8 * time.Hour, EnableSessionLock: true},
-			raised:  false,
-			timeout: 8 * time.Hour,
+			name:   "defaults do not clamp: 4h TTL fits inside an 8h window",
+			config: Config{SessionIdleTimeout: 8 * time.Hour, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
 		},
 		{
-			name:    "equal timeout is left alone",
-			config:  Config{SessionIdleTimeout: ttl, EnableSessionLock: true},
-			raised:  false,
-			timeout: ttl,
+			name:   "equal values are left alone",
+			config: Config{SessionIdleTimeout: 4 * time.Hour, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
 		},
 		{
-			name:    "locking disabled means nothing to raise",
-			config:  Config{SessionIdleTimeout: time.Minute, EnableSessionLock: false},
-			raised:  false,
-			timeout: time.Minute,
+			name:   "timeout of 0 means never lock, so there is no window to fit inside",
+			config: Config{SessionIdleTimeout: 0, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
+		},
+		{
+			name:   "locking disabled leaves the TTL alone",
+			config: Config{SessionIdleTimeout: time.Minute, EnableSessionLock: false},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.config
-			if got := c.EnsureCoversCacheTTL(ttl); got != tt.raised {
-				t.Errorf("EnsureCoversCacheTTL() = %v, want %v", got, tt.raised)
+			if got := c.ClampCacheTTL(tt.ttl); got != tt.want {
+				t.Errorf("ClampCacheTTL(%v) = %v, want %v", tt.ttl, got, tt.want)
 			}
-			if c.SessionIdleTimeout != tt.timeout {
-				t.Errorf("SessionIdleTimeout = %v, want %v", c.SessionIdleTimeout, tt.timeout)
+			if c.SessionIdleTimeout != tt.config.SessionIdleTimeout {
+				t.Errorf("ClampCacheTTL mutated the session timeout: %v", c.SessionIdleTimeout)
 			}
 		})
-	}
-}
-
-// 0 means "never lock". Raising it to the cache TTL would invert the operator's
-// explicit intent into a 4h lock.
-func TestConfig_EnsureCoversCacheTTL_ZeroMeansDisabled(t *testing.T) {
-	c := Config{SessionIdleTimeout: 0, EnableSessionLock: true}
-	if c.EnsureCoversCacheTTL(4 * time.Hour) {
-		t.Error("EnsureCoversCacheTTL raised a timeout of 0")
-	}
-	if c.SessionIdleTimeout != 0 {
-		t.Errorf("SessionIdleTimeout = %v, want 0 (never lock)", c.SessionIdleTimeout)
 	}
 }

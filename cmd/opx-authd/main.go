@@ -230,11 +230,12 @@ func main() {
 		sessionConfig.LockOnAuthFailure = lockOnAuthFailure
 	}
 
-	// One unlock must cover a whole TTL window, so the session may never idle out first.
-	// Warn, not Info: this overrides a lock-out window the operator chose.
-	if sessionConfig.EnsureCoversCacheTTL(cacheTTL) {
-		sugar.Warnw("Raised session idle timeout to match cache TTL; lower --ttl to keep a shorter lock window",
-			"session_idle_timeout", sessionConfig.SessionIdleTimeout, "cache_ttl", cacheTTL)
+	// Secrets must not stay hot past the point the session would have locked and
+	// cleared them, so the lock window caps the TTL rather than the other way round.
+	if clamped := sessionConfig.ClampCacheTTL(cacheTTL); clamped != cacheTTL {
+		sugar.Warnw("Capped cache TTL to the session idle timeout; raise --session-timeout to cache for longer",
+			"requested_ttl", cacheTTL, "cache_ttl", clamped, "session_idle_timeout", sessionConfig.SessionIdleTimeout)
+		cacheTTL = clamped
 	}
 	enableSessionLock = sessionConfig.EnableSessionLock
 

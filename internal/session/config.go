@@ -117,19 +117,22 @@ func (c *Config) loadFromEnv() {
 	}
 }
 
-// EnsureCoversCacheTTL raises the idle timeout so a single unlock covers a whole
-// cache-TTL window. A session that locks mid-TTL clears the cache and re-prompts,
-// which defeats the point of caching that long. Returns true if it raised anything.
+// ClampCacheTTL lowers a cache TTL that would outlive the session lock window,
+// and returns the TTL to actually use. Nothing should stay hot past the point
+// the session would have locked and cleared it.
 //
-// A timeout of 0 means "never lock" (see Manager.checkIdleTimeout) and is left
-// alone: turning an explicit "disable the lock" into a 4h lock would invert the
-// operator's intent, not protect it.
-func (c *Config) EnsureCoversCacheTTL(ttl time.Duration) bool {
-	if !c.EnableSessionLock || c.SessionIdleTimeout == 0 || c.SessionIdleTimeout >= ttl {
-		return false
+// The lock window is the operator's control, so it wins: a short
+// --session-timeout shortens the cache rather than the cache lengthening the
+// lock. At the defaults (4h TTL, 8h idle timeout) nothing is clamped, so one
+// unlock still covers a full 4h block.
+//
+// A timeout of 0 means "never lock" (see Manager.checkIdleTimeout), so there is
+// no window to stay inside and the TTL is left alone.
+func (c *Config) ClampCacheTTL(ttl time.Duration) time.Duration {
+	if !c.EnableSessionLock || c.SessionIdleTimeout == 0 || ttl <= c.SessionIdleTimeout {
+		return ttl
 	}
-	c.SessionIdleTimeout = ttl
-	return true
+	return c.SessionIdleTimeout
 }
 
 // validate ensures the configuration is valid

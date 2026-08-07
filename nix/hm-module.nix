@@ -53,7 +53,7 @@ in
       default = 14400;
       description = ''
         Cache TTL in seconds. The default of 4 hours is what keeps 1Password
-        from re-prompting; the daemon raises the session idle timeout to match.
+        from re-prompting. Capped to sessionTimeout so nothing outlives the lock window.
       '';
     };
 
@@ -62,7 +62,8 @@ in
       default = null;
       description = ''
         Session idle timeout in hours. Null leaves the daemon default (8h).
-        Values shorter than the cache TTL are raised to it by the daemon.
+        A value below the cache TTL caps the TTL down to it, so secrets never
+        outlive the lock window.
       '';
     };
 
