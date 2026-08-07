@@ -49,38 +49,46 @@ opx-authd --enable-audit-log --verbose
 
 ### Nix (Declarative Installation)
 
+This repo is a flake and exports the package itself:
+
 ```bash
 # Install directly
-nix profile install github:zach-source/nix-packages#opx
+nix profile install github:zach-source/opx
 
-# Or add to flake.nix
+# Or add to your flake.nix
 {
-  inputs.zach-utils.url = "github:zach-source/nix-packages";
-  # Then use: zach-utils.packages.${system}.opx
+  inputs.opx.url = "github:zach-source/opx";
+  # Then use: opx.packages.${system}.opx
 }
 ```
 
-**Home Manager Integration (Recommended):**
+**Home Manager Integration (Recommended, macOS):**
+
+`homeManagerModules.opx` runs `opx-authd` as a launchd agent. Linux (systemd user
+service) is not implemented yet — the module asserts on non-darwin.
+
 ```nix
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    zach-utils.url = "github:zach-source/nix-packages";
+    opx.url = "github:zach-source/opx";
   };
 
-  outputs = { nixpkgs, home-manager, zach-utils, ... }: {
+  outputs = { nixpkgs, home-manager, opx, ... }: {
     homeConfigurations."your-username" = home-manager.lib.homeManagerConfiguration {
       modules = [
-        zach-utils.homeManagerModules.opx
+        opx.homeManagerModules.opx
         {
           services.opx-authd = {
             enable = true;
             backend = "multi";
             enableAuditLog = true;
-            sessionTimeout = 8;
             auditLogRetentionDays = 90;
-            
+
+            # launchd agents do not inherit your shell PATH
+            opPath = "/usr/local/bin/op";
+
             # Optional: Define access policies declaratively
             policy = {
               allow = [
@@ -101,12 +109,17 @@ nix profile install github:zach-source/nix-packages#opx
 ```
 
 **Service Configuration Options:**
-- `backend`: opcli, vault, bao, multi, fake
-- `sessionTimeout`: Hours before session lock (default: 8)
+- `backend`: opcli, vault, bao, multi, fake (default: opcli)
+- `ttl`: Cache TTL in seconds (default: 14400 = 4h)
+- `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h; anything shorter than `ttl` is raised to it)
+- `opPath`: Absolute path to the `op` binary
 - `enableAuditLog`: Enable structured audit logging
 - `auditLogRetentionDays`: Days to keep audit logs (default: 30)
-- `policy`: Access control policy (JSON format)
+- `policy`: Access control policy (rendered to JSON)
 - `environmentFile`: Path to file with VAULT_TOKEN, etc.
+- `verbose`, `extraFlags`: Escape hatches
+
+Logs land in `~/Library/Logs/opx-authd.log`.
 
 ### From Source
 

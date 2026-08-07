@@ -4,6 +4,8 @@
 /build/
 /coverage/
 /tmp/
+/result
+/result-*
 *.log
 *.swp
 *.swo
