@@ -74,18 +74,27 @@ func TestGetOpPath(t *testing.T) {
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {
-	// Create test config
+	// SaveConfig writes to the XDG config dir. Point that at a temp dir, or the
+	// test overwrites the developer's real daemon.json with /test/op.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	cfg := DefaultConfig()
 	cfg.ExecutablePaths.Op = "/test/op"
 	cfg.ExecutablePaths.Vault = "/test/vault"
 
-	// Save to file
-	// We can't use SaveConfig() directly as it uses XDG dirs
-	// So we'll test the JSON marshaling
-	err := cfg.SaveConfig()
+	if err := cfg.SaveConfig(); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := LoadConfig()
 	if err != nil {
-		// Expected to fail without proper XDG setup
-		t.Logf("SaveConfig failed as expected in test environment: %v", err)
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.ExecutablePaths.Op != "/test/op" {
+		t.Errorf("Op = %q, want /test/op", loaded.ExecutablePaths.Op)
+	}
+	if loaded.ExecutablePaths.Vault != "/test/vault" {
+		t.Errorf("Vault = %q, want /test/vault", loaded.ExecutablePaths.Vault)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,5 +178,70 @@ func TestServer_SessionUnlockHandlerWithoutSessionManager(t *testing.T) {
 
 	if unlockResp.State != "disabled" {
 		t.Errorf("Expected state 'disabled', got %q", unlockResp.State)
+	}
+}
+
+// countingBackend records every backend invocation so tests can prove the cache
+// and singleflight actually suppress duplicate reads.
+type countingBackend struct {
+	mu    sync.Mutex
+	calls [][]string // flags passed on each call
+}
+
+func (c *countingBackend) Name() string { return "counting" }
+
+func (c *countingBackend) ReadRef(ctx context.Context, ref string) (string, error) {
+	return c.ReadRefWithFlags(ctx, ref, nil)
+}
+
+func (c *countingBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, flags)
+	c.mu.Unlock()
+	return "secret-for-" + ref, nil
+}
+
+func (c *countingBackend) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.calls)
+}
+
+// A ref with no explicit account must produce exactly one `op read`, no matter how
+// many 1Password accounts are signed in. Fanning out per account would mean one
+// unlock prompt per account, which is precisely what this daemon exists to avoid.
+func TestReadOne_NoAccountFanout(t *testing.T) {
+	be := &countingBackend{}
+	srv := &Server{Backend: be, Cache: cache.New(time.Hour)}
+
+	const ref = "op://Personal/example/password"
+
+	// Concurrent readers: singleflight must collapse them into one backend call.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := srv.readOne(context.Background(), ref); err != nil {
+				t.Errorf("readOne: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Sequential re-read inside the TTL: must come from cache.
+	rr, err := srv.readOne(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("readOne: %v", err)
+	}
+	if !rr.FromCache {
+		t.Error("second read should have been served from cache")
+	}
+
+	if got := be.count(); got != 1 {
+		t.Fatalf("backend called %d times, want exactly 1 (one prompt, not one per account)", got)
+	}
+	if flags := be.calls[0]; len(flags) != 0 {
+		t.Errorf("no --account flag should be synthesized for an account-less ref, got %v", flags)
 	}
 }
