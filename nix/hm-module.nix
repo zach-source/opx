@@ -20,6 +20,7 @@ let
     "--enable-audit-log"
     "--audit-log-retention-days=${toString cfg.auditLogRetentionDays}"
   ]
+  ++ lib.optional (!cfg.persistCache) "--persist-cache=false"
   ++ lib.optional (cfg.policy != null) "--policy=${policyFile}"
   ++ lib.optional cfg.verbose "--verbose"
   ++ cfg.extraFlags;
@@ -62,6 +63,16 @@ in
       description = ''
         Session idle timeout in hours. Null leaves the daemon default (8h).
         Values shorter than the cache TTL are raised to it by the daemon.
+      '';
+    };
+
+    persistCache = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Mirror the cache to an AES-256-GCM file so a restarted agent comes back
+        warm. The key is held in the login Keychain. Set false to keep secrets
+        memory-only, at the cost of a cold cache after every restart.
       '';
     };
 

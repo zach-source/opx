@@ -26,6 +26,12 @@ type Cache struct {
 	hits     int64
 	misses   int64
 	inflight int
+
+	// store, when set, mirrors the entries to an encrypted file so a daemon
+	// restart comes back warm instead of re-prompting.
+	store    *Store
+	onErr    func(error)
+	restored bool
 }
 
 func New(ttl time.Duration) *Cache {
@@ -58,6 +64,57 @@ func (c *Cache) Set(key, val string) {
 	}
 
 	c.data[key] = entry{v: safestring.New(val), exp: time.Now().Add(c.ttl), cached: time.Now()}
+	c.persistLocked()
+}
+
+// Persist attaches an encrypted store and restores whatever unexpired entries it
+// holds, so the daemon starts warm. Returns the number of entries restored.
+func (c *Cache) Persist(s *Store, onErr func(error)) (int, error) {
+	records, err := s.Load()
+	if err != nil {
+		return 0, err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.store = s
+	c.onErr = onErr
+	c.restored = true
+
+	now := time.Now()
+	restored := 0
+	for _, r := range records {
+		if now.After(r.Exp) {
+			continue
+		}
+		c.data[r.Key] = entry{v: safestring.New(r.Value), exp: r.Exp, cached: r.Cached}
+		restored++
+	}
+
+	// Expired entries were dropped, so rewrite the file to match.
+	if restored != len(records) {
+		c.persistLocked()
+	}
+	return restored, nil
+}
+
+// persistLocked mirrors the current entries to disk. Caller must hold c.mu.
+// ponytail: rewrites the whole file under the cache lock. Fine for the tens of
+// secrets a daemon actually holds; batch behind a dirty flag if it ever holds thousands.
+func (c *Cache) persistLocked() {
+	if c.store == nil {
+		return
+	}
+
+	records := make([]Record, 0, len(c.data))
+	for k, e := range c.data {
+		records = append(records, Record{Key: k, Value: e.v.String(), Exp: e.exp, Cached: e.cached})
+	}
+
+	if err := c.store.Save(records); err != nil && c.onErr != nil {
+		c.onErr(err)
+	}
 }
 
 func (c *Cache) Stats() (size int, hits, misses int64, inflight int) {
@@ -115,6 +172,9 @@ func (c *Cache) CleanupExpired() int {
 			removed++
 		}
 	}
+	if removed > 0 {
+		c.persistLocked()
+	}
 	return removed
 }
 
@@ -128,6 +188,14 @@ func (c *Cache) Clear() int {
 		// Securely zero the SafeString before removal
 		entry.v.Zero()
 		delete(c.data, key)
+	}
+
+	// A session lock clears the cache for security; the on-disk copy has to go
+	// with it, or a restart would resurrect secrets the lock just discarded.
+	if c.store != nil {
+		if err := c.store.Delete(); err != nil && c.onErr != nil {
+			c.onErr(err)
+		}
 	}
 	return removed
 }

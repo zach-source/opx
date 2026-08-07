@@ -151,6 +151,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
 - `--enable-audit-log` - Enable structured audit logging to file
 - `--audit-log-retention-days=30` - Number of days to keep audit logs
+- `--persist-cache=true` - Mirror the cache to an encrypted file so restarts stay warm (env: `OPX_PERSIST_CACHE`)
 
 ### Environment Variables
 
@@ -178,7 +179,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - **Session Management**: Configurable idle timeout (default: 8 hours) with automatic locking
 - **Cache Security**: Automatic cache clearing when sessions lock
 - **Input Validation**: Command injection protection and reference format validation
-- **Memory Security**: Values kept in-memory only with best-effort zeroization on eviction
+- **Memory Security**: Best-effort zeroization on eviction; values also mirrored to an AES-256-GCM `cache.enc` (key in OS keyring, 0600, deleted on session lock) unless `--persist-cache=false`
 - **Timeout Protection**: 20-second timeout on backend calls to prevent hanging
 - **Race Condition Protection**: Atomic file operations for token management
 
@@ -193,6 +194,7 @@ The application follows XDG Base Directory specification with backward compatibi
 - **Data**: `$XDG_DATA_HOME/op-authd/` (fallback: `~/.local/share/op-authd/`)
   - `token` - Authentication token
   - `cert.pem`, `key.pem` - TLS certificates
+  - `cache.enc` - AES-256-GCM cache mirror (key in OS keyring)
 - **Runtime**: `$XDG_RUNTIME_DIR/op-authd/socket.sock` (fallback: same as data directory)
 
 ### Legacy Paths (Existing Installations)

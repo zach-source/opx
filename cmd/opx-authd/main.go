@@ -124,6 +124,7 @@ func main() {
 	var enableAuditLog bool
 	var auditLogRetentionDays int
 	var showVersion bool
+	var persistCache bool
 	var configFile string
 	var policyFile string
 
@@ -136,6 +137,7 @@ func main() {
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
+	flag.BoolVar(&persistCache, "persist-cache", true, "keep the cache warm across restarts in an encrypted file (env: OPX_PERSIST_CACHE)")
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
 	flag.StringVar(&configFile, "config", "", "path to configuration file (overrides default locations)")
 	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
@@ -211,6 +213,10 @@ func main() {
 	}
 	if flagSet["ttl"] {
 		cacheTTL = time.Duration(ttlSec) * time.Second
+	}
+
+	if v := os.Getenv("OPX_PERSIST_CACHE"); v != "" && !flagSet["persist-cache"] {
+		persistCache = v == "true" || v == "1"
 	}
 
 	// Override config with explicitly-set command-line flags (env/file win otherwise)
@@ -316,10 +322,28 @@ func main() {
 	// Create rate limiter: 10 requests per second with burst of 5
 	rateLimiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 5)
 
+	secretCache := cache.New(cacheTTL)
+	if persistCache {
+		// Persistence is best-effort: without a usable keyring there is nowhere
+		// safe to keep the key, so fall back to memory-only rather than refuse to start.
+		if store, serr := cache.OpenStore(); serr != nil {
+			sugar.Warnw("Cache persistence disabled", "error", serr)
+		} else {
+			restored, lerr := secretCache.Persist(store, func(e error) {
+				sugar.Warnw("Failed to write encrypted cache", "error", e)
+			})
+			if lerr != nil {
+				sugar.Warnw("Could not restore encrypted cache, starting cold", "path", store.Path(), "error", lerr)
+			} else {
+				sugar.Infow("Restored encrypted cache", "path", store.Path(), "entries", restored)
+			}
+		}
+	}
+
 	srv := &server.Server{
 		SockPath:            sock,
 		Backend:             be,
-		Cache:               cache.New(cacheTTL),
+		Cache:               secretCache,
 		Session:             sessionManager,
 		MultiAccountSession: multiAccountSession,
 		Policy:              accessPolicy,

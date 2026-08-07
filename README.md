@@ -27,13 +27,28 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
   raised to at least the cache TTL at startup, so one unlock covers a whole
   TTL window instead of locking mid-window and clearing the cache.
 
-**The cache does not survive a daemon restart.** It is in-memory only, by
-design — secrets are never written to disk. After a restart the first read of a
-ref is a miss and re-runs `op read`. In practice that still does not prompt,
-because the 1Password *app* session is independent of the daemon and remains
-unlocked; measured on macOS, a post-restart read took ~0.8s with no prompt, and
-the next read was a 0.15s cache hit. If you need warm state across restarts,
-avoid restarting the daemon — do not expect persistence.
+- **Restarts stay warm.** The cache is mirrored to an encrypted file, so a
+  restarted daemon restores unexpired entries and serves the next read from
+  memory instead of re-running `op read`. See below.
+
+### Encrypted disk cache
+
+`opx-authd` keeps the cache warm across restarts by mirroring entries to
+`$XDG_DATA_HOME/opx-authd/cache.enc` (default `~/.local/share/opx-authd/cache.enc`).
+
+- **AES-256-GCM**, so the file is authenticated as well as encrypted — a
+  tampered or truncated file is rejected loudly rather than treated as an empty cache.
+- **The key lives in the OS keyring** (macOS Keychain / Secret Service), never on
+  disk beside the ciphertext. Without a usable keyring there is nowhere safe to
+  keep the key, so persistence disables itself and the daemon runs memory-only.
+- **File mode 0600**, written atomically via a temp file and rename.
+- **Expired entries are dropped on load**, so nothing outlives its TTL.
+- **A session lock deletes the file.** Locking clears the cache for security;
+  leaving the disk copy would let a restart resurrect exactly those secrets.
+
+This is a deliberate trade: secrets now touch the disk in encrypted form, where
+previously they were memory-only. Turn it off with `--persist-cache=false` or
+`OPX_PERSIST_CACHE=0` to get the old behavior — restarts then start cold.
 
 ## Features
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
@@ -135,6 +150,7 @@ service) is not implemented yet — the module asserts on non-darwin.
 **Service Configuration Options:**
 - `backend`: opcli, vault, bao, multi, fake (default: opcli)
 - `ttl`: Cache TTL in seconds (default: 14400 = 4h)
+- `persistCache`: Keep the cache warm across restarts in an encrypted file (default: true)
 - `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h; anything shorter than `ttl` is raised to it)
 - `opPath`: Absolute path to the `op` binary
 - `enableAuditLog`: Enable structured audit logging
@@ -197,6 +213,7 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `OPX_AUTHD_PATH=/path/to/opx-authd` - Custom path to daemon binary
 - `OPX_SOCKET_PATH=/tmp/custom.sock` - Custom socket path (both client and daemon)
 - `OPX_CACHE_TTL=4h` - Cache TTL (duration format; default 4h). `--ttl` (seconds) wins if given
+- `OPX_PERSIST_CACHE=0` - Disable the encrypted disk cache (default enabled). `--persist-cache` wins if given
 - `OPX_SESSION_IDLE_TIMEOUT=8h` - Session idle timeout (duration format). `--session-timeout` (hours) wins if given
 - `OPX_ENABLE_SESSION_LOCK=true` - Enable session management
 - `OPX_LOCK_ON_AUTH_FAILURE=true` - Lock the session on authentication failures
@@ -339,7 +356,7 @@ opx read "vault://secret/app#key"       # Vault (authenticated via 1Password)
 - The socket directory is `0700`, token is `0600`. Only your user should be able to talk to the daemon.
 - **Session idle timeout** automatically locks sessions after configurable period (default: 8 hours)
 - **Automatic cache clearing** when sessions lock for security
-- Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows
+- Values are zeroized on replacement/eviction to the extent Go allows. They are kept in memory plus, unless `--persist-cache=false`, an AES-256-GCM file whose key lives in the OS keyring (see [Encrypted disk cache](#encrypted-disk-cache))
 - **Command injection protection** with comprehensive input validation
 - **Race condition protection** with atomic file operations
 - **Production-ready**: Comprehensive security with audit logging and access controls
