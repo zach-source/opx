@@ -59,6 +59,28 @@ longer implies a cold daemon after a restart. Policy checks and audit logging
 still run on every request, including cache hits. Entries never outlive their
 TTL. Use `--persist-cache=false` if you rely on a restart flushing the cache.
 
+### Rotating a secret
+
+A cache that holds a value for 4 hours will serve the **old** secret for up to 4
+hours after someone rotates it. The daemon cannot see a rotation that happens
+behind its back — via `op` directly, the 1Password web UI, or another machine —
+so tell it:
+
+```bash
+op item edit 'My Item' password=...      # or however you rotate
+opx invalidate 'op://Vault/My Item/password'
+
+opx invalidate --all                     # after a bulk rotation
+```
+
+`opx invalidate` drops the entry from memory **and** from the encrypted file, so
+the next read goes back to the backend. It covers every `--account` variant of a
+ref, and needs no policy grant: the worst it can do is force a re-read.
+
+Wire it into whatever performs your rotations. Rotations driven from elsewhere
+(another host, a scheduled job, the web UI) are still invisible to this daemon —
+for those, either shorten `--ttl` or invalidate as part of the rotation job.
+
 This is a deliberate trade: secrets now touch the disk in encrypted form, where
 previously they were memory-only. Turn it off with `--persist-cache=false` or
 `OPX_PERSIST_CACHE=0` to get the old behavior — restarts then start cold.
@@ -80,6 +102,7 @@ previously they were memory-only. Turn it off with `--persist-cache=false` or
   - `POST /v1/resolve` – resolve env var mapping `{ENV: ref}`
   - `GET  /v1/status` – health/counters and session information
   - `POST /v1/session/unlock` – manually unlock locked sessions
+  - `POST /v1/invalidate` – drop cached entries by ref, or all of them
 
 ## Install
 

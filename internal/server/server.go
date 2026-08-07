@@ -166,6 +166,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("/v1/reads", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleReads))))
 	mux.HandleFunc("/v1/resolve", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleResolve))))
 	mux.HandleFunc("/v1/session/unlock", s.rateLimit(s.auth(s.limitRequestSize(s.handleSessionUnlock))))
+	mux.HandleFunc("/v1/invalidate", s.rateLimit(s.auth(s.limitRequestSize(s.handleInvalidate))))
 
 	srv := &http.Server{
 		Handler:     mux,
@@ -556,4 +557,40 @@ func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []strin
 		return protocol.ReadResponse{}, errors.New("internal type assertion failed")
 	}
 	return rr, nil
+}
+
+// handleInvalidate drops cached entries so a rotation takes effect immediately
+// instead of at the end of the TTL. Deliberately not policy-gated: the worst a
+// caller can do is force a re-read, and a writer that just rotated a secret
+// must always be able to say so.
+func (s *Server) handleInvalidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req protocol.InvalidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if !req.All && len(req.Refs) == 0 {
+		http.Error(w, "specify refs or all", http.StatusBadRequest)
+		return
+	}
+
+	removed := 0
+	if req.All {
+		removed = s.Cache.Clear()
+	} else {
+		for _, ref := range req.Refs {
+			removed += s.Cache.Invalidate(ref)
+		}
+	}
+
+	if s.Logger != nil {
+		s.Logger.Infow("cache invalidated", "all", req.All, "refs", len(req.Refs), "removed", removed)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(protocol.InvalidateResponse{Removed: removed})
 }

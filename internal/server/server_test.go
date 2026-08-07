@@ -245,3 +245,95 @@ func TestReadOne_NoAccountFanout(t *testing.T) {
 		t.Errorf("no --account flag should be synthesized for an account-less ref, got %v", flags)
 	}
 }
+
+// Rotating a secret out of band must be able to take effect immediately rather
+// than at the end of a 4h TTL.
+func TestHandleInvalidate(t *testing.T) {
+	const ref = "op://Test/item/password"
+
+	newSrv := func() (*Server, *countingBackend) {
+		be := &countingBackend{}
+		srv := &Server{Backend: be, Cache: cache.New(time.Hour)}
+		if _, err := srv.readOne(context.Background(), ref); err != nil {
+			t.Fatalf("seed read: %v", err)
+		}
+		return srv, be
+	}
+
+	t.Run("by ref forces the next read back to the backend", func(t *testing.T) {
+		srv, be := newSrv()
+
+		body := strings.NewReader(`{"refs":["` + ref + `"]}`)
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", body))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp protocol.InvalidateResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Removed != 1 {
+			t.Errorf("removed = %d, want 1", resp.Removed)
+		}
+
+		rr, err := srv.readOne(context.Background(), ref)
+		if err != nil {
+			t.Fatalf("readOne: %v", err)
+		}
+		if rr.FromCache {
+			t.Error("read after invalidate was served from cache")
+		}
+		if be.count() != 2 {
+			t.Errorf("backend called %d times, want 2 (seed + re-read)", be.count())
+		}
+	})
+
+	t.Run("--all clears everything", func(t *testing.T) {
+		srv, _ := newSrv()
+
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", strings.NewReader(`{"all":true}`)))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if size, _, _, _ := srv.Cache.Stats(); size != 0 {
+			t.Errorf("cache still holds %d entries", size)
+		}
+	})
+
+	t.Run("empty request is rejected", func(t *testing.T) {
+		srv, _ := newSrv()
+
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", strings.NewReader(`{}`)))
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", w.Code)
+		}
+		if size, _, _, _ := srv.Cache.Stats(); size != 1 {
+			t.Errorf("an empty request changed the cache (size=%d)", size)
+		}
+	})
+}
+
+// Flag variants (e.g. --account) are distinct cache keys for the same ref, so
+// invalidating the ref has to take all of them.
+func TestCacheInvalidate_CoversFlagVariants(t *testing.T) {
+	const ref = "op://Test/item/password"
+
+	c := cache.New(time.Hour)
+	c.Set(ref, "plain")
+	c.Set(ref+"|flags:--account=A", "acct-a")
+	c.Set(ref+"|flags:--account=B", "acct-b")
+	c.Set("op://Test/other/password", "untouched")
+
+	if removed := c.Invalidate(ref); removed != 3 {
+		t.Errorf("removed = %d, want 3", removed)
+	}
+	if _, ok, _, _ := c.Get("op://Test/other/password"); !ok {
+		t.Error("Invalidate removed an unrelated ref")
+	}
+}

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -197,6 +198,30 @@ func (c *Cache) CleanupExpired() int {
 			delete(c.data, key)
 			removed++
 		}
+	}
+	if removed > 0 {
+		c.persistLocked()
+	}
+	return removed
+}
+
+// Invalidate drops every cached entry for a ref, across all flag variants
+// (the cache key is "ref" or "ref|flags:..."), and returns how many it removed.
+//
+// Rotating a secret out of band leaves the daemon serving the old value until
+// its TTL runs out; this is how a writer tells it otherwise.
+func (c *Cache) Invalidate(ref string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := 0
+	for key, e := range c.data {
+		if key != ref && !strings.HasPrefix(key, ref+"|flags:") {
+			continue
+		}
+		e.v.Zero()
+		delete(c.data, key)
+		removed++
 	}
 	if removed > 0 {
 		c.persistLocked()

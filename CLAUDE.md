@@ -138,6 +138,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `POST /v1/reads` - Batch read multiple secret references
 - `POST /v1/resolve` - Resolve environment variable mappings from refs to values
 - `POST /v1/session/unlock` - Manually unlock locked sessions
+- `POST /v1/invalidate` - Drop cached entries by ref (or all) after a rotation
 
 ## Configuration
 

@@ -115,6 +115,7 @@ Usage:
   opx [--account=ACCOUNT] read REF [REF...]
   opx [--account=ACCOUNT] resolve NAME=REF [NAME=REF ...]
   opx [--account=ACCOUNT] run --env NAME=REF [--env NAME=REF ...] -- CMD [ARGS...]
+  opx invalidate REF [REF...] | --all
   opx status
   opx version
   opx audit [--since=24h|2d|1w] [--interactive]
@@ -130,6 +131,7 @@ Commands:
   read                  # Read secret references (op://, vault://, bao://)
   resolve              # Resolve environment variables  
   run                  # Run command with resolved env vars
+  invalidate           # Drop cached entries after rotating a secret
   status               # Check daemon status
   version              # Show client and server version information
   audit                # Manage access control policies
@@ -205,6 +207,28 @@ func main() {
 	}
 
 	switch cmd {
+	case "invalidate":
+		all := false
+		refs := []string{}
+		for _, a := range cmdArgs {
+			if a == "--all" {
+				all = true
+				continue
+			}
+			refs = append(refs, a)
+		}
+		if !all && len(refs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: opx invalidate REF [REF...] | opx invalidate --all")
+			os.Exit(2)
+		}
+
+		resp, err := cli.Invalidate(ctx, refs, all)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "invalidate:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("invalidated %d cache entries\n", resp.Removed)
+
 	case "status":
 		status, err := cli.Status(ctx)
 		if err != nil {
