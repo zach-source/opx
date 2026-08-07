@@ -8,5 +8,4 @@
 *.swp
 *.swo
 .DS_Store
-go.sum
 .claude/settings.local.json
