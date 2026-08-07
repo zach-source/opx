@@ -21,6 +21,7 @@ let
     "--audit-log-retention-days=${toString cfg.auditLogRetentionDays}"
   ]
   ++ lib.optional (!cfg.persistCache) "--persist-cache=false"
+  ++ lib.optional (cfg.revalidateInterval != null) "--revalidate-interval=${cfg.revalidateInterval}"
   ++ lib.optional (cfg.policy != null) "--policy=${policyFile}"
   ++ lib.optional cfg.verbose "--verbose"
   ++ cfg.extraFlags;
@@ -74,6 +75,18 @@ in
         Mirror the cache to an AES-256-GCM file so a restarted agent comes back
         warm. The key is held in the login Keychain. Set false to keep secrets
         memory-only, at the cost of a cold cache after every restart.
+      '';
+    };
+
+    revalidateInterval = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "30m";
+      description = ''
+        Periodically re-read cached secrets so rotations performed elsewhere
+        (another host, a scheduled job, the 1Password web UI) are picked up.
+        Null disables it. Read-only: it never extends TTLs, never renews the
+        session, and skips passes while the session is locked.
       '';
     };
 

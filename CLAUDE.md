@@ -153,6 +153,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `--enable-audit-log` - Enable structured audit logging to file
 - `--audit-log-retention-days=30` - Number of days to keep audit logs
 - `--persist-cache=true` - Mirror the cache to an encrypted file so restarts stay warm (env: `OPX_PERSIST_CACHE`)
+- `--revalidate-interval=` - Opt-in background re-read of cached secrets to catch out-of-band rotations, e.g. `30m` (env: `OPX_REVALIDATE_INTERVAL`; read-only, never extends TTLs, never renews the session)
 
 ### Environment Variables
 

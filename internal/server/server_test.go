@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -336,4 +337,23 @@ func TestCacheInvalidate_CoversFlagVariants(t *testing.T) {
 	if _, ok, _, _ := c.Get("op://Test/other/password"); !ok {
 		t.Error("Invalidate removed an unrelated ref")
 	}
+}
+
+// flakyBackend can be flipped to start failing, simulating a transient outage.
+type flakyBackend struct {
+	value string
+	fail  bool
+}
+
+func (f *flakyBackend) Name() string { return "flaky" }
+
+func (f *flakyBackend) ReadRef(ctx context.Context, ref string) (string, error) {
+	return f.ReadRefWithFlags(ctx, ref, nil)
+}
+
+func (f *flakyBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
+	if f.fail {
+		return "", errors.New("backend unavailable")
+	}
+	return f.value, nil
 }

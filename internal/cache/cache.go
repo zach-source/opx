@@ -205,6 +205,45 @@ func (c *Cache) CleanupExpired() int {
 	return removed
 }
 
+// Snapshot returns the live entries. Used by the revalidator to walk what is
+// cached without holding the lock across slow backend calls.
+func (c *Cache) Snapshot() []Record {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	now := time.Now()
+	records := make([]Record, 0, len(c.data))
+	for k, e := range c.data {
+		if now.After(e.exp) {
+			continue
+		}
+		records = append(records, Record{Key: k, Value: e.v.String(), Exp: e.exp, Cached: e.cached})
+	}
+	return records
+}
+
+// Refresh replaces the value of an existing entry, deliberately keeping its
+// original expiry. Revalidation must be able to correct a rotated secret without
+// extending how long it stays cached, or a periodically-refreshed entry would
+// never age out and the TTL would stop meaning anything.
+//
+// Returns false if the entry is gone or already expired, so a racing eviction
+// cannot be resurrected.
+func (c *Cache) Refresh(key, val string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	existing, ok := c.data[key]
+	if !ok || time.Now().After(existing.exp) {
+		return false
+	}
+
+	existing.v.Zero()
+	c.data[key] = entry{v: safestring.New(val), exp: existing.exp, cached: time.Now()}
+	c.persistLocked()
+	return true
+}
+
 // Invalidate drops every cached entry for a ref, across all flag variants
 // (the cache key is "ref" or "ref|flags:..."), and returns how many it removed.
 //

@@ -110,6 +110,10 @@ type Server struct {
 	Version             string
 	StartTime           time.Time
 
+	// RevalidateInterval enables the background revalidator when > 0. Off by
+	// default: it costs one backend read per cached entry per pass.
+	RevalidateInterval time.Duration
+
 	sf singleflight.Group
 	mu sync.Mutex
 }
@@ -175,6 +179,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	// Start periodic cache cleanup
 	go s.startCacheCleanup(ctx)
+
+	// Opt-in background revalidation
+	if s.RevalidateInterval > 0 {
+		go s.startRevalidator(ctx, s.RevalidateInterval)
+	}
 
 	// Session management
 	if s.Session != nil {
@@ -518,11 +527,7 @@ func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []strin
 		}
 	}
 
-	// Create cache key that includes flags for proper cache isolation
-	cacheKey := ref
-	if len(flags) > 0 {
-		cacheKey = ref + "|flags:" + strings.Join(flags, ",")
-	}
+	cacheKey := cacheKeyFor(ref, flags)
 
 	// Cache check
 	if v, ok, exp, cached := s.Cache.Get(cacheKey); ok {

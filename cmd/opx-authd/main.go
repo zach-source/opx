@@ -125,6 +125,7 @@ func main() {
 	var auditLogRetentionDays int
 	var showVersion bool
 	var persistCache bool
+	var revalidateInterval string
 	var configFile string
 	var policyFile string
 
@@ -138,6 +139,7 @@ func main() {
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
 	flag.BoolVar(&persistCache, "persist-cache", true, "keep the cache warm across restarts in an encrypted file (env: OPX_PERSIST_CACHE)")
+	flag.StringVar(&revalidateInterval, "revalidate-interval", "", "periodically re-read cached secrets to catch out-of-band rotations, e.g. 30m (default: disabled; env: OPX_REVALIDATE_INTERVAL)")
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
 	flag.StringVar(&configFile, "config", "", "path to configuration file (overrides default locations)")
 	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
@@ -217,6 +219,26 @@ func main() {
 
 	if v := os.Getenv("OPX_PERSIST_CACHE"); v != "" && !flagSet["persist-cache"] {
 		persistCache = v == "true" || v == "1"
+	}
+
+	// Opt-in: empty means disabled, so the daemon never talks to the backend
+	// on a timer unless asked to.
+	if revalidateInterval == "" {
+		revalidateInterval = os.Getenv("OPX_REVALIDATE_INTERVAL")
+	}
+	var revalidateEvery time.Duration
+	if revalidateInterval != "" {
+		d, perr := time.ParseDuration(revalidateInterval)
+		switch {
+		case perr != nil:
+			sugar.Warnw("Ignoring unparseable revalidate interval", "value", revalidateInterval, "error", perr)
+		case d < server.MinRevalidateInterval:
+			sugar.Warnw("Raising revalidate interval to the minimum",
+				"requested", d, "interval", server.MinRevalidateInterval)
+			revalidateEvery = server.MinRevalidateInterval
+		default:
+			revalidateEvery = d
+		}
 	}
 
 	// Override config with explicitly-set command-line flags (env/file win otherwise)
@@ -359,6 +381,7 @@ func main() {
 		AuditLogger:         auditLogger,
 		RateLimiter:         rateLimiter,
 		Logger:              sugar,
+		RevalidateInterval:  revalidateEvery,
 		Verbose:             verbose,
 		Version:             version,
 	}

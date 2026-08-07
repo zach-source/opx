@@ -77,9 +77,37 @@ opx invalidate --all                     # after a bulk rotation
 the next read goes back to the backend. It covers every `--account` variant of a
 ref, and needs no policy grant: the worst it can do is force a re-read.
 
-Wire it into whatever performs your rotations. Rotations driven from elsewhere
-(another host, a scheduled job, the web UI) are still invisible to this daemon —
-for those, either shorten `--ttl` or invalidate as part of the rotation job.
+Wire it into whatever performs your rotations. `opx` has no write path of its
+own and never asks for write credentials — rotations go through `op` (or `vault`)
+as they always did, and `opx invalidate` just tells the daemon about it.
+
+### Background revalidation (opt-in)
+
+`opx invalidate` only covers rotations that happen on this machine. For ones
+performed elsewhere — another host, a scheduled job, the 1Password web UI — the
+daemon can periodically re-read what it holds and correct anything that changed:
+
+```bash
+opx-authd --revalidate-interval=30m       # or OPX_REVALIDATE_INTERVAL=30m
+```
+
+**Off by default**, because each pass costs one backend read per cached entry.
+The minimum interval is 1m; anything shorter is raised to it.
+
+It is strictly read-only — it calls the same `op read` path as a normal cache
+miss, so it needs no credentials a plain read does not already have. Three
+things it deliberately does *not* do:
+
+- **It does not extend TTLs.** A refreshed entry keeps its original expiry, so a
+  periodically-revalidated secret still ages out on schedule.
+- **It does not count as session activity.** It bypasses the session wrapper, so
+  a daemon sitting idle still hits its idle lock instead of renewing itself
+  forever.
+- **It does not run against a locked session.** That would raise an interactive
+  prompt from a background timer, which is the opposite of the point.
+
+A failed revalidation read leaves the cached value in place — a transient
+backend outage should not evict a good secret and force a prompt.
 
 This is a deliberate trade: secrets now touch the disk in encrypted form, where
 previously they were memory-only. Turn it off with `--persist-cache=false` or
@@ -187,6 +215,7 @@ service) is not implemented yet — the module asserts on non-darwin.
 - `backend`: opcli, vault, bao, multi, fake (default: opcli)
 - `ttl`: Cache TTL in seconds (default: 14400 = 4h)
 - `persistCache`: Keep the cache warm across restarts in an encrypted file (default: true)
+- `revalidateInterval`: e.g. `"30m"` to periodically re-read cached secrets and catch out-of-band rotations (default: null = disabled)
 - `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h). A value below `ttl` caps `ttl` down to it
 - `opPath`: Absolute path to the `op` binary
 - `enableAuditLog`: Enable structured audit logging
@@ -250,6 +279,7 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `OPX_SOCKET_PATH=/tmp/custom.sock` - Custom socket path (both client and daemon)
 - `OPX_CACHE_TTL=4h` - Cache TTL (duration format; default 4h). `--ttl` (seconds) wins if given
 - `OPX_PERSIST_CACHE=0` - Disable the encrypted disk cache (default enabled). `--persist-cache` wins if given
+- `OPX_REVALIDATE_INTERVAL=30m` - Enable background revalidation (default: disabled). `--revalidate-interval` wins if given
 - `OPX_SESSION_IDLE_TIMEOUT=8h` - Session idle timeout (duration format). `--session-timeout` (hours) wins if given
 - `OPX_ENABLE_SESSION_LOCK=true` - Enable session management
 - `OPX_LOCK_ON_AUTH_FAILURE=true` - Lock the session on authentication failures
