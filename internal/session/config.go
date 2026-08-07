@@ -117,6 +117,17 @@ func (c *Config) loadFromEnv() {
 	}
 }
 
+// EnsureCoversCacheTTL raises the idle timeout so a single unlock covers a whole
+// cache-TTL window. A session that locks mid-TTL clears the cache and re-prompts,
+// which defeats the point of caching that long. Returns true if it raised anything.
+func (c *Config) EnsureCoversCacheTTL(ttl time.Duration) bool {
+	if !c.EnableSessionLock || c.SessionIdleTimeout >= ttl {
+		return false
+	}
+	c.SessionIdleTimeout = ttl
+	return true
+}
+
 // validate ensures the configuration is valid
 func (c *Config) validate() error {
 	if c.SessionIdleTimeout < 0 {

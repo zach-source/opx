@@ -15,7 +15,7 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
 - Bearer token with secure permissions (0600) and directory perms 0700
 - **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
-- In-memory TTL cache (default 120s) with single-flight coalescing and security clearing
+- In-memory TTL cache (default 4h) with single-flight coalescing and security clearing
 - **Multi-backend support**:
   - `opcli`: 1Password CLI integration with `op://` references
   - `vault`: HashiCorp Vault with `vault://` references  
@@ -455,7 +455,7 @@ Description=opx-authd - 1Password CLI Batching Daemon
 After=default.target
 
 [Service]
-ExecStart=%h/opx/bin/opx-authd --ttl 120 --enable-audit-log --verbose
+ExecStart=%h/opx/bin/opx-authd --ttl 14400 --enable-audit-log --verbose
 Restart=on-failure
 RestartSec=5
 

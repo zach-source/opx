@@ -8,6 +8,11 @@ import (
 	"github.com/zach-source/opx/internal/safestring"
 )
 
+// DefaultTTL is how long a fetched secret stays hot. It is deliberately long:
+// the whole point of the daemon is that one 1Password unlock covers a work
+// block instead of prompting again every couple of minutes.
+const DefaultTTL = 4 * time.Hour
+
 type entry struct {
 	v      *safestring.SafeString
 	exp    time.Time

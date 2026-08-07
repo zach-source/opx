@@ -143,7 +143,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 
 ### Command-Line Flags
 
-- `--ttl=120` - Cache TTL in seconds
+- `--ttl=14400` - Cache TTL in seconds (default 4h; env `OPX_CACHE_TTL`, e.g. `4h`)
 - `--backend=opcli` - Backend type (`opcli` or `fake`)
 - `--verbose` - Enable verbose logging
 - `--session-timeout=8` - Session idle timeout in hours (0 to disable)

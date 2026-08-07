@@ -127,7 +127,7 @@ func main() {
 	var configFile string
 	var policyFile string
 
-	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
+	flag.IntVar(&ttlSec, "ttl", int(cache.DefaultTTL.Seconds()), "cache TTL seconds (env: OPX_CACHE_TTL, e.g. 4h)")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
 	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
 	flag.StringVar(&backendName, "backend", "opcli", "backend: opcli|fake|vault|bao|multi")
@@ -140,6 +140,11 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "path to configuration file (overrides default locations)")
 	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
 	flag.Parse()
+
+	// Which flags the user actually typed. Flag defaults must not clobber config
+	// file / env values, so only explicitly-set flags override them.
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 
 	if sock == "" {
 		sock = os.Getenv("OPX_SOCKET_PATH")
@@ -195,10 +200,36 @@ func main() {
 		}
 	}
 
-	// Override config with command-line flags
-	sessionConfig.SessionIdleTimeout = time.Duration(sessionTimeout) * time.Hour
-	sessionConfig.EnableSessionLock = enableSessionLock
-	sessionConfig.LockOnAuthFailure = lockOnAuthFailure
+	// Resolve the cache TTL: default, then env, then an explicit --ttl flag.
+	cacheTTL := cache.DefaultTTL
+	if v := os.Getenv("OPX_CACHE_TTL"); v != "" {
+		if d, perr := time.ParseDuration(v); perr == nil {
+			cacheTTL = d
+		} else {
+			sugar.Warnw("Ignoring unparseable OPX_CACHE_TTL", "value", v, "error", perr)
+		}
+	}
+	if flagSet["ttl"] {
+		cacheTTL = time.Duration(ttlSec) * time.Second
+	}
+
+	// Override config with explicitly-set command-line flags (env/file win otherwise)
+	if flagSet["session-timeout"] {
+		sessionConfig.SessionIdleTimeout = time.Duration(sessionTimeout) * time.Hour
+	}
+	if flagSet["enable-session-lock"] {
+		sessionConfig.EnableSessionLock = enableSessionLock
+	}
+	if flagSet["lock-on-auth-failure"] {
+		sessionConfig.LockOnAuthFailure = lockOnAuthFailure
+	}
+
+	// One unlock must cover a whole TTL window, so the session may never idle out first.
+	if sessionConfig.EnsureCoversCacheTTL(cacheTTL) {
+		sugar.Infow("Raised session idle timeout to match cache TTL",
+			"session_idle_timeout", sessionConfig.SessionIdleTimeout, "cache_ttl", cacheTTL)
+	}
+	enableSessionLock = sessionConfig.EnableSessionLock
 
 	// Create session manager
 	var sessionManager *session.Manager
@@ -288,7 +319,7 @@ func main() {
 	srv := &server.Server{
 		SockPath:            sock,
 		Backend:             be,
-		Cache:               cache.New(time.Duration(ttlSec) * time.Second),
+		Cache:               cache.New(cacheTTL),
 		Session:             sessionManager,
 		MultiAccountSession: multiAccountSession,
 		Policy:              accessPolicy,

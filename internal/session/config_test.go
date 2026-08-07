@@ -264,3 +264,51 @@ func setEnv(key, value string) {
 		os.Setenv(key, value)
 	}
 }
+
+func TestConfig_EnsureCoversCacheTTL(t *testing.T) {
+	ttl := 4 * time.Hour
+
+	tests := []struct {
+		name    string
+		config  Config
+		raised  bool
+		timeout time.Duration
+	}{
+		{
+			name:    "shorter timeout is raised to the TTL",
+			config:  Config{SessionIdleTimeout: 30 * time.Minute, EnableSessionLock: true},
+			raised:  true,
+			timeout: ttl,
+		},
+		{
+			name:    "longer timeout is left alone",
+			config:  Config{SessionIdleTimeout: 8 * time.Hour, EnableSessionLock: true},
+			raised:  false,
+			timeout: 8 * time.Hour,
+		},
+		{
+			name:    "equal timeout is left alone",
+			config:  Config{SessionIdleTimeout: ttl, EnableSessionLock: true},
+			raised:  false,
+			timeout: ttl,
+		},
+		{
+			name:    "locking disabled means nothing to raise",
+			config:  Config{SessionIdleTimeout: time.Minute, EnableSessionLock: false},
+			raised:  false,
+			timeout: time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.config
+			if got := c.EnsureCoversCacheTTL(ttl); got != tt.raised {
+				t.Errorf("EnsureCoversCacheTTL() = %v, want %v", got, tt.raised)
+			}
+			if c.SessionIdleTimeout != tt.timeout {
+				t.Errorf("SessionIdleTimeout = %v, want %v", c.SessionIdleTimeout, tt.timeout)
+			}
+		})
+	}
+}
