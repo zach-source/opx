@@ -312,3 +312,15 @@ func TestConfig_EnsureCoversCacheTTL(t *testing.T) {
 		})
 	}
 }
+
+// 0 means "never lock". Raising it to the cache TTL would invert the operator's
+// explicit intent into a 4h lock.
+func TestConfig_EnsureCoversCacheTTL_ZeroMeansDisabled(t *testing.T) {
+	c := Config{SessionIdleTimeout: 0, EnableSessionLock: true}
+	if c.EnsureCoversCacheTTL(4 * time.Hour) {
+		t.Error("EnsureCoversCacheTTL raised a timeout of 0")
+	}
+	if c.SessionIdleTimeout != 0 {
+		t.Errorf("SessionIdleTimeout = %v, want 0 (never lock)", c.SessionIdleTimeout)
+	}
+}

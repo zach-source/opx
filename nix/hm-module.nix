@@ -93,7 +93,14 @@ in
           default_deny = true;
         }
       '';
-      description = "Access control policy, rendered to JSON and passed as --policy.";
+      description = ''
+        Access control policy, rendered to JSON and passed as --policy.
+
+        Note: this lands in the world-readable Nix store. It holds no secret
+        values, but the ref patterns and allowed binaries are visible to any
+        local user. Point `extraFlags` at a policy file outside the store if
+        your vault/item names are themselves sensitive.
+      '';
     };
 
     opPath = lib.mkOption {

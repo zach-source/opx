@@ -45,6 +45,16 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
 - **Expired entries are dropped on load**, so nothing outlives its TTL.
 - **A session lock deletes the file.** Locking clears the cache for security;
   leaving the disk copy would let a restart resurrect exactly those secrets.
+- **A restart cannot reset the idle clock.** The file records when it was
+  written; if it has sat longer than the session idle timeout, it is discarded
+  and deleted rather than restored, so restarting the daemon is not a way to
+  dodge an idle lock that would have fired while it was down.
+
+Note that restored entries are served without re-contacting the backend, which
+is the point — but it does mean an `op signout` or a revoked Vault token no
+longer implies a cold daemon after a restart. Policy checks and audit logging
+still run on every request, including cache hits. Entries never outlive their
+TTL. Use `--persist-cache=false` if you rely on a restart flushing the cache.
 
 This is a deliberate trade: secrets now touch the disk in encrypted form, where
 previously they were memory-only. Turn it off with `--persist-cache=false` or

@@ -231,8 +231,9 @@ func main() {
 	}
 
 	// One unlock must cover a whole TTL window, so the session may never idle out first.
+	// Warn, not Info: this overrides a lock-out window the operator chose.
 	if sessionConfig.EnsureCoversCacheTTL(cacheTTL) {
-		sugar.Infow("Raised session idle timeout to match cache TTL",
+		sugar.Warnw("Raised session idle timeout to match cache TTL; lower --ttl to keep a shorter lock window",
 			"session_idle_timeout", sessionConfig.SessionIdleTimeout, "cache_ttl", cacheTTL)
 	}
 	enableSessionLock = sessionConfig.EnableSessionLock
@@ -329,7 +330,13 @@ func main() {
 		if store, serr := cache.OpenStore(); serr != nil {
 			sugar.Warnw("Cache persistence disabled", "error", serr)
 		} else {
-			restored, lerr := secretCache.Persist(store, func(e error) {
+			// Restoring must not outlive an idle lock the daemon would have hit
+			// while it was down, so the store expires against the same timeout.
+			var maxIdle time.Duration
+			if sessionConfig.EnableSessionLock {
+				maxIdle = sessionConfig.SessionIdleTimeout
+			}
+			restored, lerr := secretCache.Persist(store, maxIdle, func(e error) {
 				sugar.Warnw("Failed to write encrypted cache", "error", e)
 			})
 			if lerr != nil {

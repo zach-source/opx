@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"fmt"
 	"sync"
 	"time"
 	"unsafe"
@@ -29,9 +30,8 @@ type Cache struct {
 
 	// store, when set, mirrors the entries to an encrypted file so a daemon
 	// restart comes back warm instead of re-prompting.
-	store    *Store
-	onErr    func(error)
-	restored bool
+	store *Store
+	onErr func(error)
 }
 
 func New(ttl time.Duration) *Cache {
@@ -69,9 +69,22 @@ func (c *Cache) Set(key, val string) {
 
 // Persist attaches an encrypted store and restores whatever unexpired entries it
 // holds, so the daemon starts warm. Returns the number of entries restored.
-func (c *Cache) Persist(s *Store, onErr func(error)) (int, error) {
-	records, err := s.Load()
+//
+// maxIdle, when non-zero, discards the whole file if it has sat untouched for
+// longer than the session idle timeout. Without that, restarting the daemon
+// would reset the idle clock and keep serving a cache that should have been
+// wiped by an idle lock.
+func (c *Cache) Persist(s *Store, maxIdle time.Duration, onErr func(error)) (int, error) {
+	records, savedAt, err := s.Load()
 	if err != nil {
+		// The file is unreadable (wrong key, tampered, corrupt). Drop it and carry
+		// on persisting, otherwise a single bad file disables persistence forever
+		// and strands a stale blob on disk.
+		delErr := s.Delete()
+		c.attach(s, onErr)
+		if delErr != nil {
+			return 0, fmt.Errorf("%w (and could not remove it: %v)", err, delErr)
+		}
 		return 0, err
 	}
 
@@ -80,7 +93,13 @@ func (c *Cache) Persist(s *Store, onErr func(error)) (int, error) {
 
 	c.store = s
 	c.onErr = onErr
-	c.restored = true
+
+	if maxIdle > 0 && !savedAt.IsZero() && time.Since(savedAt) > maxIdle {
+		if delErr := s.Delete(); delErr != nil && onErr != nil {
+			onErr(delErr)
+		}
+		return 0, nil
+	}
 
 	now := time.Now()
 	restored := 0
@@ -97,6 +116,13 @@ func (c *Cache) Persist(s *Store, onErr func(error)) (int, error) {
 		c.persistLocked()
 	}
 	return restored, nil
+}
+
+func (c *Cache) attach(s *Store, onErr func(error)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.store = s
+	c.onErr = onErr
 }
 
 // persistLocked mirrors the current entries to disk. Caller must hold c.mu.

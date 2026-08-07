@@ -31,6 +31,14 @@ type Record struct {
 	Cached time.Time `json:"c"`
 }
 
+// envelope wraps the records with the time they were written. Restoring compares
+// SavedAt against the session idle timeout, so restarting the daemon cannot be
+// used to reset the idle clock and keep a cache alive past a lock it should have hit.
+type envelope struct {
+	SavedAt time.Time `json:"t"`
+	Records []Record  `json:"r"`
+}
+
 // Store persists cache entries to disk as a single AES-256-GCM blob. The key
 // lives in the OS keyring, never on disk beside the ciphertext.
 type Store struct {
@@ -103,7 +111,7 @@ func (s *Store) Save(records []Record) error {
 		return s.Delete()
 	}
 
-	plaintext, err := json.Marshal(records)
+	plaintext, err := json.Marshal(envelope{SavedAt: time.Now(), Records: records})
 	if err != nil {
 		return err
 	}
@@ -122,37 +130,37 @@ func (s *Store) Save(records []Record) error {
 	return util.AtomicWriteFile(s.path, gcm.Seal(nonce, nonce, plaintext, nil), 0o600)
 }
 
-// Load returns the records on disk. A missing file is not an error; a file that
-// fails to decrypt is, so a tampered or key-mismatched store is never silently
-// treated as an empty cache.
-func (s *Store) Load() ([]Record, error) {
+// Load returns the records on disk and when they were written. A missing file is
+// not an error; a file that fails to decrypt is, so a tampered or key-mismatched
+// store is never silently treated as an empty cache.
+func (s *Store) Load() ([]Record, time.Time, error) {
 	blob, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, time.Time{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 
 	gcm, err := s.aead()
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if len(blob) < gcm.NonceSize() {
-		return nil, errors.New("cache file is truncated")
+		return nil, time.Time{}, errors.New("cache file is truncated")
 	}
 
 	nonce, ciphertext := blob[:gcm.NonceSize()], blob[gcm.NonceSize():]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
-		return nil, fmt.Errorf("cache file failed authentication: %w", err)
+		return nil, time.Time{}, fmt.Errorf("cache file failed authentication: %w", err)
 	}
 
-	var records []Record
-	if err := json.Unmarshal(plaintext, &records); err != nil {
-		return nil, err
+	var env envelope
+	if err := json.Unmarshal(plaintext, &env); err != nil {
+		return nil, time.Time{}, err
 	}
-	return records, nil
+	return env.Records, env.SavedAt, nil
 }
 
 // Delete removes the store file. A missing file is a no-op.

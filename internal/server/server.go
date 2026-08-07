@@ -243,10 +243,15 @@ func (s *Server) CacheTTL() time.Duration {
 }
 
 func (s *Server) startCacheCleanup(ctx context.Context) {
-	// Clean up expired entries every TTL/2 or every 30 seconds, whichever is longer
+	// Sweep every TTL/2, clamped to [30s, 5m]. Expired entries are only treated as
+	// misses, not removed, so an unclamped TTL/2 would leave dead plaintext in
+	// memory (and ciphertext on disk) for hours at the 4h default TTL.
 	interval := s.Cache.TTL() / 2
 	if interval < 30*time.Second {
 		interval = 30 * time.Second
+	}
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
 	}
 
 	ticker := time.NewTicker(interval)
