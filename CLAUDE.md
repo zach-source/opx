@@ -158,8 +158,9 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `OP_AUTHD_BACKEND`: Set to `fake` for testing (default: `opcli`)
 - `OPX_AUTOSTART`: Set to `0` to disable client auto-starting daemon
 - `OPX_AUTHD_PATH`: Custom path to opx-authd binary (default: search PATH)
-- `OP_AUTHD_SESSION_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
-- `OP_AUTHD_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
+- `OPX_CACHE_TTL`: Cache TTL in duration format (e.g., `4h`)
+- `OPX_SESSION_IDLE_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
+- `OPX_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
 
 #### XDG Base Directory Specification
 - `XDG_CONFIG_HOME`: Config directory base (default: `~/.config`)

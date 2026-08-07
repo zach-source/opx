@@ -9,13 +9,37 @@ caches results briefly, and provides a secure local API over a TLS-encrypted Uni
 
 ## Why?
 Toolchains that shell out to secret management CLIs (`op read`, `vault kv get`, etc.) many times end up spamming auth prompts and duplicate API calls.
-This daemon centralizes those reads from multiple sources, **coalesces identical in-flight requests**, and **short-caches** results.
+This daemon centralizes those reads from multiple sources, **coalesces identical in-flight requests**, and **caches** results for 4 hours by default.
+
+### What the cache actually guarantees
+
+- **Repeat reads of the same ref hit memory.** Within the TTL the daemon never
+  re-invokes the backend CLI, so no prompt.
+- **Concurrent reads collapse.** Eight simultaneous reads of one ref produce one
+  `op read`, via singleflight.
+- **Multiple 1Password accounts do not multiply prompts.** A ref with no
+  `--account` is passed to `op` exactly once and `op` picks the account itself;
+  the daemon never iterates signed-in accounts. With two accounts signed in
+  (e.g. `my.1password.com` and `stigenai.1password.com`) that is still one
+  invocation, not one per account. Covered by
+  `TestReadOne_NoAccountFanout` in `internal/server`.
+- **The session cannot expire out from under the cache.** The idle timeout is
+  raised to at least the cache TTL at startup, so one unlock covers a whole
+  TTL window instead of locking mid-window and clearing the cache.
+
+**The cache does not survive a daemon restart.** It is in-memory only, by
+design — secrets are never written to disk. After a restart the first read of a
+ref is a miss and re-runs `op read`. In practice that still does not prompt,
+because the 1Password *app* session is independent of the daemon and remains
+unlocked; measured on macOS, a post-restart read took ~0.8s with no prompt, and
+the next read was a 0.15s cache hit. If you need warm state across restarts,
+avoid restarting the daemon — do not expect persistence.
 
 ## Features
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
 - Bearer token with secure permissions (0600) and directory perms 0700
-- **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
-- In-memory TTL cache (default 4h) with single-flight coalescing and security clearing
+- **Session idle timeout** with automatic locking after configurable period (default: 8 hours, never shorter than the cache TTL)
+- In-memory TTL cache (default 4h, `--ttl` / `OPX_CACHE_TTL`) with single-flight coalescing and security clearing
 - **Multi-backend support**:
   - `opcli`: 1Password CLI integration with `op://` references
   - `vault`: HashiCorp Vault with `vault://` references  
@@ -172,8 +196,14 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `OPX_AUTOSTART=0` - Disable client auto-starting daemon
 - `OPX_AUTHD_PATH=/path/to/opx-authd` - Custom path to daemon binary
 - `OPX_SOCKET_PATH=/tmp/custom.sock` - Custom socket path (both client and daemon)
-- `OP_AUTHD_SESSION_TIMEOUT=8h` - Session timeout (duration format)
-- `OP_AUTHD_ENABLE_SESSION_LOCK=true` - Enable session management
+- `OPX_CACHE_TTL=4h` - Cache TTL (duration format; default 4h). `--ttl` (seconds) wins if given
+- `OPX_SESSION_IDLE_TIMEOUT=8h` - Session idle timeout (duration format). `--session-timeout` (hours) wins if given
+- `OPX_ENABLE_SESSION_LOCK=true` - Enable session management
+- `OPX_LOCK_ON_AUTH_FAILURE=true` - Lock the session on authentication failures
+- `OPX_OP_PATH`, `OPX_VAULT_PATH`, `OPX_BAO_PATH` - Absolute paths to backend CLIs when they are not on `PATH`
+
+Precedence for these is: built-in default → config file → environment → explicitly
+passed flag. A flag left at its default value never overrides your environment.
 
 ### XDG Base Directory Specification  
 - `XDG_CONFIG_HOME` - Config directory base (default: `~/.config`)
