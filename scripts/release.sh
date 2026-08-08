@@ -99,6 +99,17 @@ else
     warn "  export MACOS_NOTARY_KEY='base64-encoded-api-key.p8'"
 fi
 
+# Maintainer's release signing key. A fingerprint is public information, so it
+# lives here rather than in everyone's shell profile. Only used when the matching
+# secret key is actually on this machine - defaulting it unconditionally would
+# abort the release on any host without the key, which is the failure this whole
+# block exists to prevent.
+DEFAULT_GPG_FINGERPRINT="321CE3625F2C65F3571B8604FB7580324D7662F7"
+if [[ -z "${GPG_FINGERPRINT:-}" ]] && gpg --list-secret-keys "$DEFAULT_GPG_FINGERPRINT" &>/dev/null; then
+    export GPG_FINGERPRINT="$DEFAULT_GPG_FINGERPRINT"
+    info "Using the maintainer's signing key ${DEFAULT_GPG_FINGERPRINT}"
+fi
+
 SKIP_SIGN=""
 if [[ -n "${GPG_FINGERPRINT:-}" ]]; then
     info "GPG fingerprint detected - checksums will be signed"
