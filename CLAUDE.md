@@ -138,12 +138,13 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `POST /v1/reads` - Batch read multiple secret references
 - `POST /v1/resolve` - Resolve environment variable mappings from refs to values
 - `POST /v1/session/unlock` - Manually unlock locked sessions
+- `POST /v1/invalidate` - Drop cached entries by ref (or all) after a rotation
 
 ## Configuration
 
 ### Command-Line Flags
 
-- `--ttl=120` - Cache TTL in seconds
+- `--ttl=14400` - Cache TTL in seconds (default 4h; env `OPX_CACHE_TTL`, e.g. `4h`)
 - `--backend=opcli` - Backend type (`opcli` or `fake`)
 - `--verbose` - Enable verbose logging
 - `--session-timeout=8` - Session idle timeout in hours (0 to disable)
@@ -151,6 +152,8 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `--lock-on-auth-failure=true` - Lock session on authentication failures
 - `--enable-audit-log` - Enable structured audit logging to file
 - `--audit-log-retention-days=30` - Number of days to keep audit logs
+- `--persist-cache=true` - Mirror the cache to an encrypted file so restarts stay warm (env: `OPX_PERSIST_CACHE`)
+- `--revalidate-interval=` - Opt-in background re-read of cached secrets to catch out-of-band rotations, e.g. `30m` (env: `OPX_REVALIDATE_INTERVAL`; read-only, never extends TTLs, never renews the session)
 
 ### Environment Variables
 
@@ -158,8 +161,9 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - `OP_AUTHD_BACKEND`: Set to `fake` for testing (default: `opcli`)
 - `OPX_AUTOSTART`: Set to `0` to disable client auto-starting daemon
 - `OPX_AUTHD_PATH`: Custom path to opx-authd binary (default: search PATH)
-- `OP_AUTHD_SESSION_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
-- `OP_AUTHD_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
+- `OPX_CACHE_TTL`: Cache TTL in duration format (e.g., `4h`)
+- `OPX_SESSION_IDLE_TIMEOUT`: Session timeout in duration format (e.g., `8h`)
+- `OPX_ENABLE_SESSION_LOCK`: Enable session management (`true`/`false`)
 
 #### XDG Base Directory Specification
 - `XDG_CONFIG_HOME`: Config directory base (default: `~/.config`)
@@ -177,7 +181,7 @@ The daemon exposes these HTTP endpoints over TLS-encrypted Unix socket:
 - **Session Management**: Configurable idle timeout (default: 8 hours) with automatic locking
 - **Cache Security**: Automatic cache clearing when sessions lock
 - **Input Validation**: Command injection protection and reference format validation
-- **Memory Security**: Values kept in-memory only with best-effort zeroization on eviction
+- **Memory Security**: Best-effort zeroization on eviction; values also mirrored to an AES-256-GCM `cache.enc` (key in OS keyring, 0600, deleted on session lock) unless `--persist-cache=false`
 - **Timeout Protection**: 20-second timeout on backend calls to prevent hanging
 - **Race Condition Protection**: Atomic file operations for token management
 
@@ -192,6 +196,7 @@ The application follows XDG Base Directory specification with backward compatibi
 - **Data**: `$XDG_DATA_HOME/op-authd/` (fallback: `~/.local/share/op-authd/`)
   - `token` - Authentication token
   - `cert.pem`, `key.pem` - TLS certificates
+  - `cache.enc` - AES-256-GCM cache mirror (key in OS keyring)
 - **Runtime**: `$XDG_RUNTIME_DIR/op-authd/socket.sock` (fallback: same as data directory)
 
 ### Legacy Paths (Existing Installations)

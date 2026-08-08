@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      # go.sum was once gitignored, which broke every clean build. Fail loudly if it goes missing again.
+      - name: go.sum is committed
+        run: git ls-files --error-unmatch go.sum
+
+      - name: go.mod/go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Build with a read-only module cache
+        run: go build -mod=readonly ./...
+
+      - name: Vet
+        # unsafeptr is disabled: internal/cache ZeroizeString intentionally writes through
+        # unsafe.Pointer to scrub secret bytes.
+        run: go vet -unsafeptr=false ./...
+
+      - name: Test
+        run: go test ./...

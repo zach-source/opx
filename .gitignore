@@ -4,9 +4,11 @@
 /build/
 /coverage/
 /tmp/
+/result
+/result-*
 *.log
 *.swp
 *.swo
 .DS_Store
-go.sum
 .claude/settings.local.json
+.mcp.json

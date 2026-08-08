@@ -264,3 +264,55 @@ func setEnv(key, value string) {
 		os.Setenv(key, value)
 	}
 }
+
+func TestConfig_ClampCacheTTL(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+		ttl    time.Duration
+		want   time.Duration
+	}{
+		{
+			name:   "TTL longer than the lock window is capped to it",
+			config: Config{SessionIdleTimeout: 30 * time.Minute, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   30 * time.Minute,
+		},
+		{
+			name:   "defaults do not clamp: 4h TTL fits inside an 8h window",
+			config: Config{SessionIdleTimeout: 8 * time.Hour, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
+		},
+		{
+			name:   "equal values are left alone",
+			config: Config{SessionIdleTimeout: 4 * time.Hour, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
+		},
+		{
+			name:   "timeout of 0 means never lock, so there is no window to fit inside",
+			config: Config{SessionIdleTimeout: 0, EnableSessionLock: true},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
+		},
+		{
+			name:   "locking disabled leaves the TTL alone",
+			config: Config{SessionIdleTimeout: time.Minute, EnableSessionLock: false},
+			ttl:    4 * time.Hour,
+			want:   4 * time.Hour,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.config
+			if got := c.ClampCacheTTL(tt.ttl); got != tt.want {
+				t.Errorf("ClampCacheTTL(%v) = %v, want %v", tt.ttl, got, tt.want)
+			}
+			if c.SessionIdleTimeout != tt.config.SessionIdleTimeout {
+				t.Errorf("ClampCacheTTL mutated the session timeout: %v", c.SessionIdleTimeout)
+			}
+		})
+	}
+}

@@ -221,3 +221,10 @@ func (c *Client) ResolveWithFlags(ctx context.Context, env map[string]string, fl
 func (c *Client) EnsureReady(ctx context.Context) error {
 	return c.ensureDaemon(ctx)
 }
+
+// Invalidate drops cached entries for the given refs, or the whole cache.
+func (c *Client) Invalidate(ctx context.Context, refs []string, all bool) (protocol.InvalidateResponse, error) {
+	var resp protocol.InvalidateResponse
+	err := c.doJSON(ctx, "POST", "/v1/invalidate", protocol.InvalidateRequest{Refs: refs, All: all}, &resp)
+	return resp, err
+}

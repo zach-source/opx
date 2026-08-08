@@ -124,10 +124,12 @@ func main() {
 	var enableAuditLog bool
 	var auditLogRetentionDays int
 	var showVersion bool
+	var persistCache bool
+	var revalidateInterval string
 	var configFile string
 	var policyFile string
 
-	flag.IntVar(&ttlSec, "ttl", 120, "cache TTL seconds")
+	flag.IntVar(&ttlSec, "ttl", int(cache.DefaultTTL.Seconds()), "cache TTL seconds (env: OPX_CACHE_TTL, e.g. 4h)")
 	flag.StringVar(&sock, "sock", "", "unix socket path (default: XDG data dir or ~/.op-authd/socket.sock)")
 	flag.BoolVar(&verbose, "verbose", false, "verbose logging")
 	flag.StringVar(&backendName, "backend", "opcli", "backend: opcli|fake|vault|bao|multi")
@@ -136,10 +138,17 @@ func main() {
 	flag.BoolVar(&lockOnAuthFailure, "lock-on-auth-failure", true, "lock session on authentication failures")
 	flag.BoolVar(&enableAuditLog, "enable-audit-log", false, "enable structured audit logging to file")
 	flag.IntVar(&auditLogRetentionDays, "audit-log-retention-days", 30, "number of days to keep audit logs (0 = keep all)")
+	flag.BoolVar(&persistCache, "persist-cache", true, "keep the cache warm across restarts in an encrypted file (env: OPX_PERSIST_CACHE)")
+	flag.StringVar(&revalidateInterval, "revalidate-interval", "", "periodically re-read cached secrets to catch out-of-band rotations, e.g. 30m (default: disabled; env: OPX_REVALIDATE_INTERVAL)")
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
 	flag.StringVar(&configFile, "config", "", "path to configuration file (overrides default locations)")
 	flag.StringVar(&policyFile, "policy", "", "path to policy file (overrides default policy.json)")
 	flag.Parse()
+
+	// Which flags the user actually typed. Flag defaults must not clobber config
+	// file / env values, so only explicitly-set flags override them.
+	flagSet := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
 
 	if sock == "" {
 		sock = os.Getenv("OPX_SOCKET_PATH")
@@ -195,10 +204,62 @@ func main() {
 		}
 	}
 
-	// Override config with command-line flags
-	sessionConfig.SessionIdleTimeout = time.Duration(sessionTimeout) * time.Hour
-	sessionConfig.EnableSessionLock = enableSessionLock
-	sessionConfig.LockOnAuthFailure = lockOnAuthFailure
+	// Resolve the cache TTL: default, then env, then an explicit --ttl flag.
+	cacheTTL := cache.DefaultTTL
+	if v := os.Getenv("OPX_CACHE_TTL"); v != "" {
+		if d, perr := time.ParseDuration(v); perr == nil {
+			cacheTTL = d
+		} else {
+			sugar.Warnw("Ignoring unparseable OPX_CACHE_TTL", "value", v, "error", perr)
+		}
+	}
+	if flagSet["ttl"] {
+		cacheTTL = time.Duration(ttlSec) * time.Second
+	}
+
+	if v := os.Getenv("OPX_PERSIST_CACHE"); v != "" && !flagSet["persist-cache"] {
+		persistCache = v == "true" || v == "1"
+	}
+
+	// Opt-in: empty means disabled, so the daemon never talks to the backend
+	// on a timer unless asked to.
+	if revalidateInterval == "" {
+		revalidateInterval = os.Getenv("OPX_REVALIDATE_INTERVAL")
+	}
+	var revalidateEvery time.Duration
+	if revalidateInterval != "" {
+		d, perr := time.ParseDuration(revalidateInterval)
+		switch {
+		case perr != nil:
+			sugar.Warnw("Ignoring unparseable revalidate interval", "value", revalidateInterval, "error", perr)
+		case d < server.MinRevalidateInterval:
+			sugar.Warnw("Raising revalidate interval to the minimum",
+				"requested", d, "interval", server.MinRevalidateInterval)
+			revalidateEvery = server.MinRevalidateInterval
+		default:
+			revalidateEvery = d
+		}
+	}
+
+	// Override config with explicitly-set command-line flags (env/file win otherwise)
+	if flagSet["session-timeout"] {
+		sessionConfig.SessionIdleTimeout = time.Duration(sessionTimeout) * time.Hour
+	}
+	if flagSet["enable-session-lock"] {
+		sessionConfig.EnableSessionLock = enableSessionLock
+	}
+	if flagSet["lock-on-auth-failure"] {
+		sessionConfig.LockOnAuthFailure = lockOnAuthFailure
+	}
+
+	// Secrets must not stay hot past the point the session would have locked and
+	// cleared them, so the lock window caps the TTL rather than the other way round.
+	if clamped := sessionConfig.ClampCacheTTL(cacheTTL); clamped != cacheTTL {
+		sugar.Warnw("Capped cache TTL to the session idle timeout; raise --session-timeout to cache for longer",
+			"requested_ttl", cacheTTL, "cache_ttl", clamped, "session_idle_timeout", sessionConfig.SessionIdleTimeout)
+		cacheTTL = clamped
+	}
+	enableSessionLock = sessionConfig.EnableSessionLock
 
 	// Create session manager
 	var sessionManager *session.Manager
@@ -285,10 +346,34 @@ func main() {
 	// Create rate limiter: 10 requests per second with burst of 5
 	rateLimiter := rate.NewLimiter(rate.Every(100*time.Millisecond), 5)
 
+	secretCache := cache.New(cacheTTL)
+	if persistCache {
+		// Persistence is best-effort: without a usable keyring there is nowhere
+		// safe to keep the key, so fall back to memory-only rather than refuse to start.
+		if store, serr := cache.OpenStore(); serr != nil {
+			sugar.Warnw("Cache persistence disabled", "error", serr)
+		} else {
+			// Restoring must not outlive an idle lock the daemon would have hit
+			// while it was down, so the store expires against the same timeout.
+			var maxIdle time.Duration
+			if sessionConfig.EnableSessionLock {
+				maxIdle = sessionConfig.SessionIdleTimeout
+			}
+			restored, lerr := secretCache.Persist(store, maxIdle, func(e error) {
+				sugar.Warnw("Failed to write encrypted cache", "error", e)
+			})
+			if lerr != nil {
+				sugar.Warnw("Could not restore encrypted cache, starting cold", "path", store.Path(), "error", lerr)
+			} else {
+				sugar.Infow("Restored encrypted cache", "path", store.Path(), "entries", restored)
+			}
+		}
+	}
+
 	srv := &server.Server{
 		SockPath:            sock,
 		Backend:             be,
-		Cache:               cache.New(time.Duration(ttlSec) * time.Second),
+		Cache:               secretCache,
 		Session:             sessionManager,
 		MultiAccountSession: multiAccountSession,
 		Policy:              accessPolicy,
@@ -296,6 +381,7 @@ func main() {
 		AuditLogger:         auditLogger,
 		RateLimiter:         rateLimiter,
 		Logger:              sugar,
+		RevalidateInterval:  revalidateEvery,
 		Verbose:             verbose,
 		Version:             version,
 	}

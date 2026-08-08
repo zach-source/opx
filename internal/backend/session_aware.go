@@ -37,6 +37,12 @@ func (s *SessionAwareBackend) Name() string {
 }
 
 // ReadRef reads a secret reference with session validation
+// Unwrap returns the backend underneath, without session validation or activity
+// tracking. It exists for the revalidator: a background refresh must never count
+// as user activity, or the idle timeout would keep being pushed out and the
+// session would never lock.
+func (s *SessionAwareBackend) Unwrap() Backend { return s.backend }
+
 func (s *SessionAwareBackend) ReadRef(ctx context.Context, ref string) (string, error) {
 	return s.ReadRefWithFlags(ctx, ref, nil)
 }

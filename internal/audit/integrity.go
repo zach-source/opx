@@ -128,19 +128,22 @@ func (im *IntegrityManager) VerifyLogFile(logPath string) (bool, []string, error
 	return len(errors) == 0, errors, nil
 }
 
-// ensureHMACKey ensures an HMAC key exists in secure storage
+// ensureHMACKey ensures an HMAC key exists in secure storage.
+//
+// Both stores are read before minting a new key. Reading the file back is what
+// makes the fallback a fallback: on a host with no keyring (headless Linux, CI)
+// the previous version wrote the key and never looked at it again, so every call
+// generated a fresh random key and no signature could ever be verified against
+// the key that produced it.
 func ensureHMACKey() ([]byte, string, error) {
-	// Try to get existing key from keyring
-	keyData, err := keyring.Get(integrityService, keyAccount)
-	if err == nil {
-		// Parse stored key data (hex:keyid format)
-		if len(keyData) > 65 { // 64 hex chars + ':' + keyid
-			hexKey := keyData[:64]
-			keyID := keyData[65:]
-			key, err := hex.DecodeString(hexKey)
-			if err == nil && len(key) == 32 {
-				return key, keyID, nil
-			}
+	if keyData, err := keyring.Get(integrityService, keyAccount); err == nil {
+		if key, keyID, ok := parseHMACKeyData(keyData); ok {
+			return key, keyID, nil
+		}
+	}
+	if keyData, err := loadHMACKeyFile(); err == nil {
+		if key, keyID, ok := parseHMACKeyData(keyData); ok {
+			return key, keyID, nil
 		}
 	}
 
@@ -150,8 +153,10 @@ func ensureHMACKey() ([]byte, string, error) {
 		return nil, "", fmt.Errorf("failed to generate HMAC key: %w", err)
 	}
 
-	keyID := fmt.Sprintf("key-%d", time.Now().Unix())
-	keyData = hex.EncodeToString(key) + ":" + keyID
+	// Nanoseconds, not seconds: two distinct keys minted in the same second would
+	// otherwise share an ID, turning "unknown key" into a silent bad signature.
+	keyID := fmt.Sprintf("key-%d", time.Now().UnixNano())
+	keyData := hex.EncodeToString(key) + ":" + keyID
 
 	// Store in keyring
 	if err := keyring.Set(integrityService, keyAccount, keyData); err != nil {
@@ -162,6 +167,32 @@ func ensureHMACKey() ([]byte, string, error) {
 	}
 
 	return key, keyID, nil
+}
+
+// parseHMACKeyData splits the stored "<64 hex chars>:<key id>" form.
+func parseHMACKeyData(keyData string) ([]byte, string, bool) {
+	if len(keyData) <= 65 || keyData[64] != ':' {
+		return nil, "", false
+	}
+	key, err := hex.DecodeString(keyData[:64])
+	if err != nil || len(key) != 32 {
+		return nil, "", false
+	}
+	return key, keyData[65:], true
+}
+
+// loadHMACKeyFile reads the fallback key file written by storeHMACKeyFile.
+func loadHMACKeyFile() (string, error) {
+	dataDir, err := util.DataDir()
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(filepath.Join(dataDir, "integrity.key"))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // getHMACKeyByID retrieves an HMAC key by its ID (for verification)

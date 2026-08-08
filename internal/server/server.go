@@ -110,6 +110,10 @@ type Server struct {
 	Version             string
 	StartTime           time.Time
 
+	// RevalidateInterval enables the background revalidator when > 0. Off by
+	// default: it costs one backend read per cached entry per pass.
+	RevalidateInterval time.Duration
+
 	sf singleflight.Group
 	mu sync.Mutex
 }
@@ -166,6 +170,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("/v1/reads", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleReads))))
 	mux.HandleFunc("/v1/resolve", s.rateLimit(s.authWithPolicy(s.limitRequestSize(s.handleResolve))))
 	mux.HandleFunc("/v1/session/unlock", s.rateLimit(s.auth(s.limitRequestSize(s.handleSessionUnlock))))
+	mux.HandleFunc("/v1/invalidate", s.rateLimit(s.auth(s.limitRequestSize(s.handleInvalidate))))
 
 	srv := &http.Server{
 		Handler:     mux,
@@ -174,6 +179,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	// Start periodic cache cleanup
 	go s.startCacheCleanup(ctx)
+
+	// Opt-in background revalidation
+	if s.RevalidateInterval > 0 {
+		go s.startRevalidator(ctx, s.RevalidateInterval)
+	}
 
 	// Session management
 	if s.Session != nil {
@@ -243,10 +253,15 @@ func (s *Server) CacheTTL() time.Duration {
 }
 
 func (s *Server) startCacheCleanup(ctx context.Context) {
-	// Clean up expired entries every TTL/2 or every 30 seconds, whichever is longer
+	// Sweep every TTL/2, clamped to [30s, 5m]. Expired entries are only treated as
+	// misses, not removed, so an unclamped TTL/2 would leave dead plaintext in
+	// memory (and ciphertext on disk) for hours at the 4h default TTL.
 	interval := s.Cache.TTL() / 2
 	if interval < 30*time.Second {
 		interval = 30 * time.Second
+	}
+	if interval > 5*time.Minute {
+		interval = 5 * time.Minute
 	}
 
 	ticker := time.NewTicker(interval)
@@ -512,11 +527,7 @@ func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []strin
 		}
 	}
 
-	// Create cache key that includes flags for proper cache isolation
-	cacheKey := ref
-	if len(flags) > 0 {
-		cacheKey = ref + "|flags:" + strings.Join(flags, ",")
-	}
+	cacheKey := cacheKeyFor(ref, flags)
 
 	// Cache check
 	if v, ok, exp, cached := s.Cache.Get(cacheKey); ok {
@@ -551,4 +562,40 @@ func (s *Server) readOneWithFlags(ctx context.Context, ref string, flags []strin
 		return protocol.ReadResponse{}, errors.New("internal type assertion failed")
 	}
 	return rr, nil
+}
+
+// handleInvalidate drops cached entries so a rotation takes effect immediately
+// instead of at the end of the TTL. Deliberately not policy-gated: the worst a
+// caller can do is force a re-read, and a writer that just rotated a secret
+// must always be able to say so.
+func (s *Server) handleInvalidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req protocol.InvalidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if !req.All && len(req.Refs) == 0 {
+		http.Error(w, "specify refs or all", http.StatusBadRequest)
+		return
+	}
+
+	removed := 0
+	if req.All {
+		removed = s.Cache.Clear()
+	} else {
+		for _, ref := range req.Refs {
+			removed += s.Cache.Invalidate(ref)
+		}
+	}
+
+	if s.Logger != nil {
+		s.Logger.Infow("cache invalidated", "all", req.All, "refs", len(req.Refs), "removed", removed)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(protocol.InvalidateResponse{Removed: removed})
 }

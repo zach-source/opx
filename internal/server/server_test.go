@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,4 +180,180 @@ func TestServer_SessionUnlockHandlerWithoutSessionManager(t *testing.T) {
 	if unlockResp.State != "disabled" {
 		t.Errorf("Expected state 'disabled', got %q", unlockResp.State)
 	}
+}
+
+// countingBackend records every backend invocation so tests can prove the cache
+// and singleflight actually suppress duplicate reads.
+type countingBackend struct {
+	mu    sync.Mutex
+	calls [][]string // flags passed on each call
+}
+
+func (c *countingBackend) Name() string { return "counting" }
+
+func (c *countingBackend) ReadRef(ctx context.Context, ref string) (string, error) {
+	return c.ReadRefWithFlags(ctx, ref, nil)
+}
+
+func (c *countingBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, flags)
+	c.mu.Unlock()
+	return "secret-for-" + ref, nil
+}
+
+func (c *countingBackend) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.calls)
+}
+
+// A ref with no explicit account must produce exactly one `op read`, no matter how
+// many 1Password accounts are signed in. Fanning out per account would mean one
+// unlock prompt per account, which is precisely what this daemon exists to avoid.
+func TestReadOne_NoAccountFanout(t *testing.T) {
+	be := &countingBackend{}
+	srv := &Server{Backend: be, Cache: cache.New(time.Hour)}
+
+	const ref = "op://Personal/example/password"
+
+	// Concurrent readers: singleflight must collapse them into one backend call.
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := srv.readOne(context.Background(), ref); err != nil {
+				t.Errorf("readOne: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Sequential re-read inside the TTL: must come from cache.
+	rr, err := srv.readOne(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("readOne: %v", err)
+	}
+	if !rr.FromCache {
+		t.Error("second read should have been served from cache")
+	}
+
+	if got := be.count(); got != 1 {
+		t.Fatalf("backend called %d times, want exactly 1 (one prompt, not one per account)", got)
+	}
+	if flags := be.calls[0]; len(flags) != 0 {
+		t.Errorf("no --account flag should be synthesized for an account-less ref, got %v", flags)
+	}
+}
+
+// Rotating a secret out of band must be able to take effect immediately rather
+// than at the end of a 4h TTL.
+func TestHandleInvalidate(t *testing.T) {
+	const ref = "op://Test/item/password"
+
+	newSrv := func() (*Server, *countingBackend) {
+		be := &countingBackend{}
+		srv := &Server{Backend: be, Cache: cache.New(time.Hour)}
+		if _, err := srv.readOne(context.Background(), ref); err != nil {
+			t.Fatalf("seed read: %v", err)
+		}
+		return srv, be
+	}
+
+	t.Run("by ref forces the next read back to the backend", func(t *testing.T) {
+		srv, be := newSrv()
+
+		body := strings.NewReader(`{"refs":["` + ref + `"]}`)
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", body))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp protocol.InvalidateResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Removed != 1 {
+			t.Errorf("removed = %d, want 1", resp.Removed)
+		}
+
+		rr, err := srv.readOne(context.Background(), ref)
+		if err != nil {
+			t.Fatalf("readOne: %v", err)
+		}
+		if rr.FromCache {
+			t.Error("read after invalidate was served from cache")
+		}
+		if be.count() != 2 {
+			t.Errorf("backend called %d times, want 2 (seed + re-read)", be.count())
+		}
+	})
+
+	t.Run("--all clears everything", func(t *testing.T) {
+		srv, _ := newSrv()
+
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", strings.NewReader(`{"all":true}`)))
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if size, _, _, _ := srv.Cache.Stats(); size != 0 {
+			t.Errorf("cache still holds %d entries", size)
+		}
+	})
+
+	t.Run("empty request is rejected", func(t *testing.T) {
+		srv, _ := newSrv()
+
+		w := httptest.NewRecorder()
+		srv.handleInvalidate(w, httptest.NewRequest("POST", "/v1/invalidate", strings.NewReader(`{}`)))
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", w.Code)
+		}
+		if size, _, _, _ := srv.Cache.Stats(); size != 1 {
+			t.Errorf("an empty request changed the cache (size=%d)", size)
+		}
+	})
+}
+
+// Flag variants (e.g. --account) are distinct cache keys for the same ref, so
+// invalidating the ref has to take all of them.
+func TestCacheInvalidate_CoversFlagVariants(t *testing.T) {
+	const ref = "op://Test/item/password"
+
+	c := cache.New(time.Hour)
+	c.Set(ref, "plain")
+	c.Set(ref+"|flags:--account=A", "acct-a")
+	c.Set(ref+"|flags:--account=B", "acct-b")
+	c.Set("op://Test/other/password", "untouched")
+
+	if removed := c.Invalidate(ref); removed != 3 {
+		t.Errorf("removed = %d, want 3", removed)
+	}
+	if _, ok, _, _ := c.Get("op://Test/other/password"); !ok {
+		t.Error("Invalidate removed an unrelated ref")
+	}
+}
+
+// flakyBackend can be flipped to start failing, simulating a transient outage.
+type flakyBackend struct {
+	value string
+	fail  bool
+}
+
+func (f *flakyBackend) Name() string { return "flaky" }
+
+func (f *flakyBackend) ReadRef(ctx context.Context, ref string) (string, error) {
+	return f.ReadRefWithFlags(ctx, ref, nil)
+}
+
+func (f *flakyBackend) ReadRefWithFlags(ctx context.Context, ref string, flags []string) (string, error) {
+	if f.fail {
+		return "", errors.New("backend unavailable")
+	}
+	return f.value, nil
 }

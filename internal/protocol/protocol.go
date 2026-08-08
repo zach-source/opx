@@ -62,3 +62,14 @@ type SessionUnlockResponse struct {
 	State   string `json:"state"`
 	Message string `json:"message,omitempty"`
 }
+
+// InvalidateRequest drops cached entries. Refs are invalidated across all flag
+// variants; All clears the whole cache instead.
+type InvalidateRequest struct {
+	Refs []string `json:"refs,omitempty"`
+	All  bool     `json:"all,omitempty"`
+}
+
+type InvalidateResponse struct {
+	Removed int `json:"removed"`
+}

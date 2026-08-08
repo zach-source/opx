@@ -9,13 +9,115 @@ caches results briefly, and provides a secure local API over a TLS-encrypted Uni
 
 ## Why?
 Toolchains that shell out to secret management CLIs (`op read`, `vault kv get`, etc.) many times end up spamming auth prompts and duplicate API calls.
-This daemon centralizes those reads from multiple sources, **coalesces identical in-flight requests**, and **short-caches** results.
+This daemon centralizes those reads from multiple sources, **coalesces identical in-flight requests**, and **caches** results for 4 hours by default.
+
+### What the cache actually guarantees
+
+- **Repeat reads of the same ref hit memory.** Within the TTL the daemon never
+  re-invokes the backend CLI, so no prompt.
+- **Concurrent reads collapse.** Eight simultaneous reads of one ref produce one
+  `op read`, via singleflight.
+- **Multiple 1Password accounts do not multiply prompts.** A ref with no
+  `--account` is passed to `op` exactly once and `op` picks the account itself;
+  the daemon never iterates signed-in accounts. With two accounts signed in
+  (e.g. `my.1password.com` and `stigenai.1password.com`) that is still one
+  invocation, not one per account. Covered by
+  `TestReadOne_NoAccountFanout` in `internal/server`.
+- **Nothing stays hot past the lock window.** At startup the cache TTL is capped
+  to the session idle timeout, so a secret can never outlive the point at which
+  the session would have locked and cleared it. At the defaults (4h TTL, 8h idle
+  timeout) nothing is capped and one unlock covers a full 4h block; shortening
+  `--session-timeout` shortens the cache with it, rather than the cache silently
+  extending your lock window.
+
+- **Restarts stay warm.** The cache is mirrored to an encrypted file, so a
+  restarted daemon restores unexpired entries and serves the next read from
+  memory instead of re-running `op read`. See below.
+
+### Encrypted disk cache
+
+`opx-authd` keeps the cache warm across restarts by mirroring entries to
+`$XDG_DATA_HOME/opx-authd/cache.enc` (default `~/.local/share/opx-authd/cache.enc`).
+
+- **AES-256-GCM**, so the file is authenticated as well as encrypted — a
+  tampered or truncated file is rejected loudly rather than treated as an empty cache.
+- **The key lives in the OS keyring** (macOS Keychain / Secret Service), never on
+  disk beside the ciphertext. Without a usable keyring there is nowhere safe to
+  keep the key, so persistence disables itself and the daemon runs memory-only.
+- **File mode 0600**, written atomically via a temp file and rename.
+- **Expired entries are dropped on load**, so nothing outlives its TTL.
+- **A session lock deletes the file.** Locking clears the cache for security;
+  leaving the disk copy would let a restart resurrect exactly those secrets.
+- **A restart cannot reset the idle clock.** The file records when it was
+  written; if it has sat longer than the session idle timeout, it is discarded
+  and deleted rather than restored, so restarting the daemon is not a way to
+  dodge an idle lock that would have fired while it was down.
+
+Note that restored entries are served without re-contacting the backend, which
+is the point — but it does mean an `op signout` or a revoked Vault token no
+longer implies a cold daemon after a restart. Policy checks and audit logging
+still run on every request, including cache hits. Entries never outlive their
+TTL. Use `--persist-cache=false` if you rely on a restart flushing the cache.
+
+### Rotating a secret
+
+A cache that holds a value for 4 hours will serve the **old** secret for up to 4
+hours after someone rotates it. The daemon cannot see a rotation that happens
+behind its back — via `op` directly, the 1Password web UI, or another machine —
+so tell it:
+
+```bash
+op item edit 'My Item' password=...      # or however you rotate
+opx invalidate 'op://Vault/My Item/password'
+
+opx invalidate --all                     # after a bulk rotation
+```
+
+`opx invalidate` drops the entry from memory **and** from the encrypted file, so
+the next read goes back to the backend. It covers every `--account` variant of a
+ref, and needs no policy grant: the worst it can do is force a re-read.
+
+Wire it into whatever performs your rotations. `opx` has no write path of its
+own and never asks for write credentials — rotations go through `op` (or `vault`)
+as they always did, and `opx invalidate` just tells the daemon about it.
+
+### Background revalidation (opt-in)
+
+`opx invalidate` only covers rotations that happen on this machine. For ones
+performed elsewhere — another host, a scheduled job, the 1Password web UI — the
+daemon can periodically re-read what it holds and correct anything that changed:
+
+```bash
+opx-authd --revalidate-interval=30m       # or OPX_REVALIDATE_INTERVAL=30m
+```
+
+**Off by default**, because each pass costs one backend read per cached entry.
+The minimum interval is 1m; anything shorter is raised to it.
+
+It is strictly read-only — it calls the same `op read` path as a normal cache
+miss, so it needs no credentials a plain read does not already have. Three
+things it deliberately does *not* do:
+
+- **It does not extend TTLs.** A refreshed entry keeps its original expiry, so a
+  periodically-revalidated secret still ages out on schedule.
+- **It does not count as session activity.** It bypasses the session wrapper, so
+  a daemon sitting idle still hits its idle lock instead of renewing itself
+  forever.
+- **It does not run against a locked session.** That would raise an interactive
+  prompt from a background timer, which is the opposite of the point.
+
+A failed revalidation read leaves the cached value in place — a transient
+backend outage should not evict a good secret and force a prompt.
+
+This is a deliberate trade: secrets now touch the disk in encrypted form, where
+previously they were memory-only. Turn it off with `--persist-cache=false` or
+`OPX_PERSIST_CACHE=0` to get the old behavior — restarts then start cold.
 
 ## Features
 - Unix domain socket server with TLS encryption (XDG Base Directory compliant)
 - Bearer token with secure permissions (0600) and directory perms 0700
-- **Session idle timeout** with automatic locking after configurable period (default: 8 hours)
-- In-memory TTL cache (default 120s) with single-flight coalescing and security clearing
+- **Session idle timeout** with automatic locking after configurable period (default: 8 hours); it caps the cache TTL, so nothing outlives the lock window
+- In-memory TTL cache (default 4h, `--ttl` / `OPX_CACHE_TTL`) with single-flight coalescing and security clearing
 - **Multi-backend support**:
   - `opcli`: 1Password CLI integration with `op://` references
   - `vault`: HashiCorp Vault with `vault://` references  
@@ -28,6 +130,7 @@ This daemon centralizes those reads from multiple sources, **coalesces identical
   - `POST /v1/resolve` – resolve env var mapping `{ENV: ref}`
   - `GET  /v1/status` – health/counters and session information
   - `POST /v1/session/unlock` – manually unlock locked sessions
+  - `POST /v1/invalidate` – drop cached entries by ref, or all of them
 
 ## Install
 
@@ -49,38 +152,46 @@ opx-authd --enable-audit-log --verbose
 
 ### Nix (Declarative Installation)
 
+This repo is a flake and exports the package itself:
+
 ```bash
 # Install directly
-nix profile install github:zach-source/nix-packages#opx
+nix profile install github:zach-source/opx
 
-# Or add to flake.nix
+# Or add to your flake.nix
 {
-  inputs.zach-utils.url = "github:zach-source/nix-packages";
-  # Then use: zach-utils.packages.${system}.opx
+  inputs.opx.url = "github:zach-source/opx";
+  # Then use: opx.packages.${system}.opx
 }
 ```
 
-**Home Manager Integration (Recommended):**
+**Home Manager Integration (Recommended, macOS):**
+
+`homeManagerModules.opx` runs `opx-authd` as a launchd agent. Linux (systemd user
+service) is not implemented yet — the module asserts on non-darwin.
+
 ```nix
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    zach-utils.url = "github:zach-source/nix-packages";
+    opx.url = "github:zach-source/opx";
   };
 
-  outputs = { nixpkgs, home-manager, zach-utils, ... }: {
+  outputs = { nixpkgs, home-manager, opx, ... }: {
     homeConfigurations."your-username" = home-manager.lib.homeManagerConfiguration {
       modules = [
-        zach-utils.homeManagerModules.opx
+        opx.homeManagerModules.opx
         {
           services.opx-authd = {
             enable = true;
             backend = "multi";
             enableAuditLog = true;
-            sessionTimeout = 8;
             auditLogRetentionDays = 90;
-            
+
+            # launchd agents do not inherit your shell PATH
+            opPath = "/usr/local/bin/op";
+
             # Optional: Define access policies declaratively
             policy = {
               allow = [
@@ -101,12 +212,19 @@ nix profile install github:zach-source/nix-packages#opx
 ```
 
 **Service Configuration Options:**
-- `backend`: opcli, vault, bao, multi, fake
-- `sessionTimeout`: Hours before session lock (default: 8)
+- `backend`: opcli, vault, bao, multi, fake (default: opcli)
+- `ttl`: Cache TTL in seconds (default: 14400 = 4h)
+- `persistCache`: Keep the cache warm across restarts in an encrypted file (default: true)
+- `revalidateInterval`: e.g. `"30m"` to periodically re-read cached secrets and catch out-of-band rotations (default: null = disabled)
+- `sessionTimeout`: Hours before session lock (default: null → daemon default of 8h). A value below `ttl` caps `ttl` down to it
+- `opPath`: Absolute path to the `op` binary
 - `enableAuditLog`: Enable structured audit logging
 - `auditLogRetentionDays`: Days to keep audit logs (default: 30)
-- `policy`: Access control policy (JSON format)
+- `policy`: Access control policy (rendered to JSON)
 - `environmentFile`: Path to file with VAULT_TOKEN, etc.
+- `verbose`, `extraFlags`: Escape hatches
+
+Logs land in `~/Library/Logs/opx-authd.log`.
 
 ### From Source
 
@@ -159,8 +277,16 @@ opx-authd --backend=multi --enable-audit-log --session-timeout=8 --verbose
 - `OPX_AUTOSTART=0` - Disable client auto-starting daemon
 - `OPX_AUTHD_PATH=/path/to/opx-authd` - Custom path to daemon binary
 - `OPX_SOCKET_PATH=/tmp/custom.sock` - Custom socket path (both client and daemon)
-- `OP_AUTHD_SESSION_TIMEOUT=8h` - Session timeout (duration format)
-- `OP_AUTHD_ENABLE_SESSION_LOCK=true` - Enable session management
+- `OPX_CACHE_TTL=4h` - Cache TTL (duration format; default 4h). `--ttl` (seconds) wins if given
+- `OPX_PERSIST_CACHE=0` - Disable the encrypted disk cache (default enabled). `--persist-cache` wins if given
+- `OPX_REVALIDATE_INTERVAL=30m` - Enable background revalidation (default: disabled). `--revalidate-interval` wins if given
+- `OPX_SESSION_IDLE_TIMEOUT=8h` - Session idle timeout (duration format). `--session-timeout` (hours) wins if given
+- `OPX_ENABLE_SESSION_LOCK=true` - Enable session management
+- `OPX_LOCK_ON_AUTH_FAILURE=true` - Lock the session on authentication failures
+- `OPX_OP_PATH`, `OPX_VAULT_PATH`, `OPX_BAO_PATH` - Absolute paths to backend CLIs when they are not on `PATH`
+
+Precedence for these is: built-in default → config file → environment → explicitly
+passed flag. A flag left at its default value never overrides your environment.
 
 ### XDG Base Directory Specification  
 - `XDG_CONFIG_HOME` - Config directory base (default: `~/.config`)
@@ -296,7 +422,7 @@ opx read "vault://secret/app#key"       # Vault (authenticated via 1Password)
 - The socket directory is `0700`, token is `0600`. Only your user should be able to talk to the daemon.
 - **Session idle timeout** automatically locks sessions after configurable period (default: 8 hours)
 - **Automatic cache clearing** when sessions lock for security
-- Values are kept in-memory only and zeroized on replacement/eviction to the extent Go allows
+- Values are zeroized on replacement/eviction to the extent Go allows. They are kept in memory plus, unless `--persist-cache=false`, an AES-256-GCM file whose key lives in the OS keyring (see [Encrypted disk cache](#encrypted-disk-cache))
 - **Command injection protection** with comprehensive input validation
 - **Race condition protection** with atomic file operations
 - **Production-ready**: Comprehensive security with audit logging and access controls
@@ -455,7 +581,7 @@ Description=opx-authd - 1Password CLI Batching Daemon
 After=default.target
 
 [Service]
-ExecStart=%h/opx/bin/opx-authd --ttl 120 --enable-audit-log --verbose
+ExecStart=%h/opx/bin/opx-authd --ttl 14400 --enable-audit-log --verbose
 Restart=on-failure
 RestartSec=5
 
