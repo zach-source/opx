@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"strings"
@@ -398,5 +399,29 @@ func BenchmarkIntegrityManager_SignEvent(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		manager.SignEvent(event)
+	}
+}
+
+// The invariant that broke on hosts without a keyring: two calls must hand back
+// the same key. When only the keyring was read, the unread file fallback meant a
+// fresh random key every call and no event could verify against its own signature.
+func TestEnsureHMACKey_StableAcrossCalls(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	key1, id1, err := ensureHMACKey()
+	if err != nil {
+		t.Fatalf("first ensureHMACKey: %v", err)
+	}
+
+	key2, id2, err := ensureHMACKey()
+	if err != nil {
+		t.Fatalf("second ensureHMACKey: %v", err)
+	}
+
+	if id1 != id2 {
+		t.Errorf("key ID changed between calls: %q then %q", id1, id2)
+	}
+	if !bytes.Equal(key1, key2) {
+		t.Error("key material changed between calls")
 	}
 }
