@@ -79,6 +79,15 @@ Architecture:
 
 success "Git tag ${VERSION} created"
 
+# Push the tag before GoReleaser runs. changelog.use is 'github', which builds
+# the release notes from a compare API call against the new tag - if the tag only
+# exists locally that returns 404 and the whole release dies after building.
+info "Pushing tag ${VERSION}..."
+if ! git push origin "${VERSION}"; then
+    git tag -d "${VERSION}" >/dev/null
+    error "Could not push tag ${VERSION}"
+fi
+
 # Check for signing credentials (using GoReleaser standard env vars)
 if [[ -n "${MACOS_SIGN_P12:-}" ]] && [[ -n "${MACOS_SIGN_PASSWORD:-}" ]]; then
     info "Apple Developer credentials detected - macOS binaries will be signed"
@@ -146,8 +155,9 @@ fi
 # here would otherwise leave it behind and the retry would abort on
 # "Version tag already exists" - with nothing published.
 if ! "$GORELEASER_BIN" release --clean ${SKIP_SIGN}; then
-    warn "Release failed - removing local tag ${VERSION} so this can be retried"
+    warn "Release failed - removing tag ${VERSION} so this can be retried"
     git tag -d "${VERSION}" >/dev/null
+    git push --delete origin "${VERSION}" >/dev/null 2>&1 || warn "Could not delete remote tag ${VERSION}"
     error "GoReleaser failed"
 fi
 
