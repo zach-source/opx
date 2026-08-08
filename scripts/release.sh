@@ -99,10 +99,25 @@ else
     warn "  export MACOS_NOTARY_KEY='base64-encoded-api-key.p8'"
 fi
 
+SKIP_SIGN=""
 if [[ -n "${GPG_FINGERPRINT:-}" ]]; then
     info "GPG fingerprint detected - checksums will be signed"
 else
+    # The signs: block templates .Env.GPG_FINGERPRINT unconditionally, so without
+    # this the whole release aborts after building rather than shipping unsigned.
     warn "GPG_FINGERPRINT not set - checksums will not be signed"
+    SKIP_SIGN="--skip=sign"
+fi
+
+# GoReleaser needs a forge token. Outside CI there is no GITHUB_TOKEN in the
+# environment, so fall back to the one the GitHub CLI is already logged in with.
+if [[ -z "${GITHUB_TOKEN:-}" ]] && [[ -z "${GITLAB_TOKEN:-}" ]] && [[ -z "${GITEA_TOKEN:-}" ]]; then
+    if GITHUB_TOKEN=$(gh auth token 2>/dev/null) && [[ -n "$GITHUB_TOKEN" ]]; then
+        export GITHUB_TOKEN
+        info "Using the GitHub CLI's token"
+    else
+        error "No GITHUB_TOKEN set and 'gh auth token' returned nothing. Run: gh auth login"
+    fi
 fi
 
 # Run GoReleaser
@@ -116,8 +131,14 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
     exit 0
 fi
 
-# Actual release
-"$GORELEASER_BIN" release --clean
+# Actual release. The tag is created above, before GoReleaser runs, so a failure
+# here would otherwise leave it behind and the retry would abort on
+# "Version tag already exists" - with nothing published.
+if ! "$GORELEASER_BIN" release --clean ${SKIP_SIGN}; then
+    warn "Release failed - removing local tag ${VERSION} so this can be retried"
+    git tag -d "${VERSION}" >/dev/null
+    error "GoReleaser failed"
+fi
 
 success "🎉 Release ${VERSION} completed successfully!"
 success "Release URL: https://github.com/zach-source/opx/releases/tag/${VERSION}"
